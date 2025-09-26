@@ -5,65 +5,91 @@ import logging
 import os
 import pdb 
 import random 
+import signal
+import sys
+import time
+from typing import List, Dict, Optional, Tuple
 from job_hash_store import JobHashStore
+import aiohttp
+from config import *
 
 # Set up logging for the scraper module
 logger = logging.getLogger(__name__)
 
-# CSS Selectors - all defined at the top for easy maintenance
-JOB_CONTAINER_SELECTOR = '.EimVGf'
-JOB_TITLE_SELECTOR = '.tNxQIb.PUpOsf'
-COMPANY_SELECTOR = '.wHYlTd.MKCbgd.a3jPc'
-LOCATION_PLATFORM_SELECTOR = '.wHYlTd.FqK3wc.MKCbgd'
-JOB_TYPE_SELECTOR = 'span.Yf9oye[aria-label*="Employment type"], span.Yf9oye[aria-label*="Job Type"], .nYym1e span.RcZtZb'
-AGE_SELECTOR = 'span.Yf9oye[aria-label*="Posted"]'
-SALARY_SELECTOR = 'span.Yf9oye[aria-label*="Salary"]'
-DESCRIPTION_CONTAINER_SELECTOR = '.NgUYpe div span.hkXmid, .NgUYpe div span.us2QZb'
-SHOW_MORE_BUTTON_SELECTOR = 'div[jsname="G7vtgf"] div[role="button"]'
-ACTIVE_JOB_PANEL_SELECTOR = 'div.BIB1wf[style*="display: block"]'
-PLATFORM_LINKS_SELECTOR = '.nNzjpf-cS4Vcb-PvZLI-wxkYzf .yVRmze-s2gQvd a'
+# Global flag for graceful shutdown
+shutdown_flag = False
 
-# Configuration
-MAX_JOBS_TO_SCRAPE = 10
-MAX_SCROLL_ATTEMPTS = 10
-SCROLL_DELAY = 2  # seconds
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    global shutdown_flag
+    logger.warning(f"Received signal {signum}. Initiating graceful shutdown...")
+    shutdown_flag = True
 
-# Human-like timing configurations
-SLEEP_SHORT = (1.0, 2.5)      # Quick actions (clicks)
-SLEEP_MEDIUM = (2.0, 4.0)     # Reading content, waiting for panels
-SLEEP_LONG = (3.5, 6.0)       # Waiting for page loads, scrolling
-SLEEP_SCROLL = (1.5, 3.0)     # Scrolling delay
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
-def random_sleep(range_tuple):
-    """Get a random sleep duration within the specified range"""
+def random_sleep(range_tuple: Tuple[float, float]) -> float:
+    """
+    Get a random sleep duration within the specified range.
+    
+    Args:
+        range_tuple: Tuple containing (min_duration, max_duration) in seconds
+        
+    Returns:
+        float: Random duration between min and max values
+    """
     return random.uniform(range_tuple[0], range_tuple[1])
 
-async def human_sleep(range_tuple):
-    """Sleep for a random duration within the specified range"""
+async def human_sleep(range_tuple: Tuple[float, float]) -> None:
+    """
+    Sleep for a random duration within the specified range to mimic human behavior.
+    
+    Args:
+        range_tuple: Tuple containing (min_duration, max_duration) in seconds
+    """
     duration = random_sleep(range_tuple)
-    logger.debug(f"Sleeping for {duration:.2f} seconds")
+    logger.debug(f"Human-like sleep for {duration:.2f} seconds")
     await asyncio.sleep(duration)
 
-def get_json_filename():
-    """Generate a timestamp-based filename for the JSON output"""
+def get_json_filename() -> str:
+    """
+    Generate a timestamp-based filename for the JSON output.
+    
+    Returns:
+        str: Formatted filename with timestamp
+    """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"data/jobs/jobs_{timestamp}.json"
 
-def save_job_incrementally(job_data, filename):
+def save_job_incrementally(job_data: Dict, filename: str) -> bool:
     """
     Save a job to a JSON file incrementally.
     If the file exists, read it, append the job, and write it back.
     If not, create a new file with this job as the first element.
+    
+    Args:
+        job_data: Dictionary containing job information
+        filename: Path to the JSON file
+        
+    Returns:
+        bool: True if save was successful, False otherwise
     """
+    job_title = job_data.get('title', 'Unknown')
+    job_company = job_data.get('company', 'Unknown')
+    
     try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        
         # Check if file exists and has content
         if os.path.exists(filename) and os.path.getsize(filename) > 0:
             # Read existing jobs
             with open(filename, 'r', encoding='utf-8') as f:
                 try:
                     jobs = json.load(f)
-                except json.JSONDecodeError:
-                    logger.error(f"Error parsing JSON in {filename}, starting fresh")
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decode error in {filename}: {e}. Starting fresh for job '{job_title}' at '{job_company}'")
                     jobs = []
         else:
             # Create new file with empty array
@@ -76,195 +102,400 @@ def save_job_incrementally(job_data, filename):
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(jobs, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"Added job '{job_data['title']}' to {filename} (total: {len(jobs)})")
+        logger.info(f"Successfully saved job '{job_title}' at '{job_company}' to {filename} (total: {len(jobs)} jobs)")
         return True
+        
+    except PermissionError as e:
+        logger.error(f"Permission denied saving job '{job_title}' at '{job_company}' to {filename}: {e}")
+        return False
+    except IOError as e:
+        logger.error(f"IO error saving job '{job_title}' at '{job_company}' to {filename}: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Error saving job '{job_data['title']}' to {filename}: {e}")
+        logger.error(f"Unexpected error saving job '{job_title}' at '{job_company}' to {filename}: {e}")
         return False
 
-async def perform_scraping(page):
+# async def send_jobs_to_n8n_with_retry(jobs: List[Dict], max_retries: int = 3, base_delay: float = 1.0) -> bool:
+#     """
+#     Send jobs to n8n webhook with retry logic and exponential backoff.
+    
+#     Args:
+#         jobs: List of job dictionaries to send
+#         max_retries: Maximum number of retry attempts
+#         base_delay: Base delay for exponential backoff
+        
+#     Returns:
+#         bool: True if successful, False otherwise
+#     """
+#     n8n_webhook_url = N8N_WEBHOOK_URL
+#     headers = {
+#         'Authorization': N8N_AUTH_TOKEN,
+#         'Content-Type': 'application/json'
+#     }
+    
+#     job_titles = [job.get('title', 'Unknown') for job in jobs]
+#     logger.debug(f"Attempting to send {len(jobs)} jobs to n8n: {job_titles[:3]}{'...' if len(job_titles) > 3 else ''}")
+    
+#     for attempt in range(max_retries + 1):
+#         try:
+#             start_time = time.time()
+            
+#             async with aiohttp.ClientSession() as session:
+#                 async with session.post(
+#                     n8n_webhook_url, 
+#                     json=jobs, 
+#                     headers=headers,
+#                     timeout=aiohttp.ClientTimeout(total=30)
+#                 ) as response:
+#                     response_time = time.time() - start_time
+                    
+#                     if response.status == 200:
+#                         logger.info(f"Successfully sent {len(jobs)} jobs to n8n in {response_time:.2f}s (attempt {attempt + 1})")
+#                         return True
+#                     else:
+#                         response_text = await response.text()
+#                         logger.warning(f"n8n webhook returned status {response.status} on attempt {attempt + 1}: {response_text}")
+                        
+#         except asyncio.TimeoutError:
+#             logger.warning(f"Timeout sending jobs to n8n on attempt {attempt + 1}")
+#         except aiohttp.ClientError as e:
+#             logger.warning(f"Client error sending jobs to n8n on attempt {attempt + 1}: {e}")
+#         except Exception as e:
+#             logger.error(f"Unexpected error sending jobs to n8n on attempt {attempt + 1}: {e}")
+        
+#         # Don't wait after the last attempt
+#         if attempt < max_retries:
+#             delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+#             logger.debug(f"Retrying in {delay:.2f} seconds...")
+#             await asyncio.sleep(delay)
+    
+#     logger.error(f"Failed to send {len(jobs)} jobs to n8n after {max_retries + 1} attempts")
+#     return False
+
+async def extract_basic_job_info(job_element) -> Optional[Dict]:
+    """
+    Extract basic job information from a job element.
+    
+    Args:
+        job_element: Playwright element containing job information
+        
+    Returns:
+        Dict or None: Basic job information or None if extraction fails
+    """
+    try:
+        # Extract job title
+        title_el = await job_element.query_selector(JOB_TITLE_SELECTOR)
+        if not title_el:
+            logger.debug("Job element missing title selector")
+            return None
+            
+        title = await title_el.text_content()
+        if not title:
+            logger.debug("Job element has empty title")
+            return None
+        
+        # Extract company
+        company_el = await job_element.query_selector(COMPANY_SELECTOR)
+        company = await company_el.text_content() if company_el else "N/A"
+        
+        # Process location and platform
+        loc_platform_el = await job_element.query_selector(LOCATION_PLATFORM_SELECTOR)
+        loc_platform = await loc_platform_el.text_content() if loc_platform_el else ""
+        location = loc_platform.split('•')[0].strip() if '•' in loc_platform else loc_platform
+        platform = loc_platform.split('•')[1].strip() if '•' in loc_platform and len(loc_platform.split('•')) > 1 else "N/A"
+        
+        # Get other job details
+        job_type_el = await job_element.query_selector(JOB_TYPE_SELECTOR)
+        age_el = await job_element.query_selector(AGE_SELECTOR)
+        salary_el = await job_element.query_selector(SALARY_SELECTOR)
+        
+        job_type = await job_type_el.text_content() if job_type_el else "N/A"
+        age = await age_el.text_content() if age_el else "N/A"
+        salary = await salary_el.text_content() if salary_el else "N/A"
+        
+        return {
+            'title': title.strip(),
+            'company': company.strip(),
+            'location': location.strip(),
+            'platform': platform.strip(),
+            'job_type': job_type.strip(),
+            'posted': age.strip(),
+            'salary': salary.strip()
+        }
+        
+    except Exception as e:
+        logger.warning(f"Error extracting basic job info: {e}")
+        return None
+
+async def extract_detailed_job_info(page, job_element, basic_info: Dict) -> Optional[Dict]:
+    """
+    Extract detailed job information by clicking on the job element.
+    
+    Args:
+        page: Playwright page object
+        job_element: Playwright element to click
+        basic_info: Basic job information already extracted
+        
+    Returns:
+        Dict or None: Complete job information or None if extraction fails
+    """
+    job_title = basic_info.get('title', 'Unknown')
+    job_company = basic_info.get('company', 'Unknown')
+    
+    try:
+        # Click on the job
+        await job_element.click()
+        logger.debug(f"Clicked on job: '{job_title}' at '{job_company}'")
+
+        # Initialize variables
+        platform_links = []
+        description = ""
+
+        # Wait for the job details panel to load
+        await human_sleep(SLEEP_MEDIUM)
+        
+        active_panel = await page.query_selector(ACTIVE_JOB_PANEL_SELECTOR)
+        
+        if active_panel:
+            # Extract description
+            desc_elements = await active_panel.query_selector_all(DESCRIPTION_CONTAINER_SELECTOR)
+            if desc_elements:
+                for desc_el in desc_elements:
+                    content = await desc_el.text_content()
+                    if content:
+                        description += content + " "
+                description = description.strip()
+            
+            if not description:
+                description = "No description available"
+                logger.debug(f"No description found for job: '{job_title}' at '{job_company}'")
+
+            # Extract platform links
+            link_elements = await active_panel.query_selector_all(PLATFORM_LINKS_SELECTOR)
+            for link in link_elements:
+                href = await link.get_attribute('href')
+                text = await link.text_content()
+                if href:
+                    platform_links.append({
+                        'text': text.strip() if text else '', 
+                        'href': href
+                    })
+            
+            logger.debug(f"Extracted details for job: '{job_title}' at '{job_company}' - {len(platform_links)} links found")
+        else:
+            logger.warning(f"Could not find active job panel for '{job_title}' at '{job_company}'")
+            description = "Failed to locate job details panel"
+
+        # Create complete job data
+        job_data = {
+            **basic_info,
+            'description': description,
+            'platform_links': platform_links,
+            'scraped_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        return job_data
+        
+    except Exception as e:
+        logger.error(f"Error extracting detailed job info for '{job_title}' at '{job_company}': {e}")
+        return None
+
+# async def process_job_batch(jobs_batch: List[Dict]) -> bool:
+#     """
+#     Process a batch of jobs by sending them to n8n with fixed batch size.
+    
+#     Args:
+#         jobs_batch: List of job dictionaries to process
+        
+#     Returns:
+#         bool: True if successful, False otherwise
+#     """
+#     if not jobs_batch:
+#         return True
+    
+#     job_titles = [job.get('title', 'Unknown') for job in jobs_batch]
+#     logger.info(f"Processing batch of {len(jobs_batch)} jobs: {job_titles[:2]}{'...' if len(job_titles) > 2 else ''}")
+    
+#     return await send_jobs_to_n8n_with_retry(jobs_batch)
+
+async def perform_scraping(page) -> Optional[int]:
     """
     Scrape job listings from Google Jobs search results with scrolling support.
     
     Args:
         page: The Playwright page object to use for scraping
+        
+    Returns:
+        int or None: Number of jobs scraped, or None if scraping failed
     """
-    logger.info("Starting scraping process...")
+    global shutdown_flag
     
-    # Initialize the job hash store
-    hash_store = JobHashStore()
-    # Clean up expired job hashes at the start of each scraping session
-    hash_store.cleanup_expired()
+    logger.info("Starting job scraping process...")
     
-    # Get hash store stats for logging
-    stats = hash_store.get_stats()
-    logger.info(f"Job hash store stats: {stats['total_jobs_tracked']} jobs tracked, oldest from {stats['oldest_job_date']}")
-    
-    # Create output filename at start (so all jobs go to the same file)
-    output_filename = get_json_filename()
-    logger.info(f"Jobs will be saved to: {output_filename}")
-    
-    # Wait for the job listings to load
     try:
-        await page.wait_for_selector(JOB_CONTAINER_SELECTOR, timeout=10000)
-    except Exception as e:
-        logger.error(f"Could not find job listings: {e}")
-        return []
-    
-    # Track processed jobs to avoid duplicates
-    processed_job_titles = set()
-    jobs_count = 0 
-    skipped_duplicates = 0
-    # Scroll and load more jobs
-    scroll_attempts = 0
-    
-    
-    while scroll_attempts < MAX_SCROLL_ATTEMPTS:
-        # Get current job elements
-        job_elements = await page.query_selector_all(JOB_CONTAINER_SELECTOR)
-        current_job_count = len(job_elements)
+        # Initialize the job hash store
+        hash_store = JobHashStore()
+        hash_store.cleanup_expired()
         
-        logger.info(f"Found {current_job_count} jobs so far...")
+        # Get hash store stats for logging
+        stats = hash_store.get_stats()
+        logger.info(f"Job hash store initialized - {stats['total_jobs_tracked']} jobs tracked, oldest from {stats['oldest_job_date']}")
         
-        # breakpoint() 
-        # Process visible job   s
-        for job_element in job_elements:
-            try:
-                # Extract job title for tracking
-                title_el = await job_element.query_selector(JOB_TITLE_SELECTOR)
-                if not title_el:
+        # Create output filename
+        output_filename = get_json_filename()
+        logger.info(f"Jobs will be saved to: {output_filename}")
+        
+        # Wait for job listings to load
+        try:
+            await page.wait_for_selector(JOB_CONTAINER_SELECTOR, timeout=10000)
+            logger.debug("Job container selector found successfully")
+        except Exception as e:
+            logger.error(f"Could not find job listings: {e}")
+            return None
+        
+        # Initialize tracking variables
+        processed_job_keys = set()
+        jobs_count = 0
+        skipped_duplicates = 0
+        failed_extractions = 0
+        jobs_to_send = []
+        scroll_attempts = 0
+        
+        logger.info(f"Starting scraping loop - target: {MAX_JOBS_TO_SCRAPE} jobs, batch size: {BATCH_SIZE}, max scrolls: {MAX_SCROLL_ATTEMPTS}")
+        
+        while scroll_attempts < MAX_SCROLL_ATTEMPTS and not shutdown_flag:
+            # Get current job elements
+            job_elements = await page.query_selector_all(JOB_CONTAINER_SELECTOR)
+            current_job_count = len(job_elements)
+            
+            logger.debug(f"Found {current_job_count} job elements on page (scroll attempt {scroll_attempts})")
+            
+            # Process visible jobs
+            for job_element in job_elements:
+                if shutdown_flag:
+                    logger.warning("Shutdown signal received, stopping job processing")
+                    break
+                
+                # Extract basic job information
+                basic_info = await extract_basic_job_info(job_element)
+                if not basic_info:
+                    failed_extractions += 1
                     continue
-                    
-                title = await title_el.text_content()
-                company_el = await job_element.query_selector(COMPANY_SELECTOR)
-                company = await company_el.text_content() if company_el else "N/A"
+                
+                job_title = basic_info['title']
+                job_company = basic_info['company']
                 
                 # Skip if we've already processed this job in this session
-                job_key = f"{title}_{company}"
-                if job_key in processed_job_titles:
+                job_key = f"{job_title}_{job_company}"
+                if job_key in processed_job_keys:
+                    logger.debug(f"Skipping already processed job: '{job_title}' at '{job_company}'")
                     continue
-                    
-                processed_job_titles.add(job_key)
                 
-                # Process location and platform
-                loc_platform_el = await job_element.query_selector(LOCATION_PLATFORM_SELECTOR)
-                loc_platform = await loc_platform_el.text_content() if loc_platform_el else ""
-                location = loc_platform.split('•')[0].strip() if '•' in loc_platform else loc_platform
-                platform = loc_platform.split('•')[1].strip() if '•' in loc_platform and len(loc_platform.split('•')) > 1 else "N/A"
+                processed_job_keys.add(job_key)
                 
-                # Get other job details
-                job_type_el = await job_element.query_selector(JOB_TYPE_SELECTOR)
-                age_el = await job_element.query_selector(AGE_SELECTOR)
-                salary_el = await job_element.query_selector(SALARY_SELECTOR)
-                
-                job_type = await job_type_el.text_content() if job_type_el else "N/A"
-                age = await age_el.text_content() if age_el else "N/A"
-                salary = await salary_el.text_content() if salary_el else "N/A"
-                
-                # Create a preliminary job data for BASIC duplicate checking
+                # Check for basic duplicates using hash store
                 preliminary_job_data = {
-                    'title': title,
-                    'company': company,
-                    'location': location
+                    'title': job_title,
+                    'company': job_company,
+                    'location': basic_info['location']
                 }
                 
-                # FIRST CHECK: Use basic hash to quickly check if job might be a duplicate
-                # This avoids clicking on obvious duplicates
                 if hash_store.is_basic_duplicate(preliminary_job_data):
-                    logger.debug(f"Skipping likely duplicate job: {title} at {company}")
+                    logger.debug(f"Skipping basic duplicate: '{job_title}' at '{job_company}'")
                     skipped_duplicates += 1
                     continue
 
-                # Get description by clicking on the job
-                await job_element.click()
-                logger.info(f"Clicked on job: {title}")
-
-                # Initialize platform_links before try block
-                platform_links = []
-                description = ""
-
-                # Wait for the job details panel to load fully
-                try:
-                    # First wait for the job details panel itself to be visible
-                    # await page.wait_for_selector('.NgUYpe', timeout=10000)
-                    await human_sleep(SLEEP_MEDIUM)  # Give it more time to fully render
-                    
-                    active_panel = await page.query_selector(ACTIVE_JOB_PANEL_SELECTOR)
-                    
-                    # Extract description with more targeted selectors
-                    if active_panel:
-                        # Description extraction (as before)
-                        desc_elements = await active_panel.query_selector_all(DESCRIPTION_CONTAINER_SELECTOR)
-                        if desc_elements:
-                            for desc_el in desc_elements:
-                                content = await desc_el.text_content()
-                                if content:
-                                    description += content + " "
-                            description = description.strip()
-                        if not description:
-                            description = "No description available"
-
-                        # ----------- PLATFORM LINKS EXTRACTION -----------
-                        link_elements = await active_panel.query_selector_all(PLATFORM_LINKS_SELECTOR)
-                        for link in link_elements:
-                            href = await link.get_attribute('href')
-                            text = await link.text_content()
-                            if href:
-                                platform_links.append({'text': text.strip() if text else '', 'href': href})
-
-                    else:
-                        logger.warning(f"Could not find active job panel for {title}")
-                        description = "Failed to locate job details panel"
-                        platform_links = []
-                except Exception as e:
-                    logger.error(f"Error while loading job details panel for {title}: {e}")
-                    description = "Failed to load job details panel"
+                # Extract detailed job information
+                detailed_info = await extract_detailed_job_info(page, job_element, basic_info)
+                if not detailed_info:
+                    logger.warning(f"Failed to extract detailed info for: '{job_title}' at '{job_company}'")
+                    failed_extractions += 1
+                    continue
                 
-                # Create job data dictionary
-                job_data = {
-                    'title': title,
-                    'company': company,
-                    'location': location,
-                    'platform': platform,
-                    'job_type': job_type,
-                    'posted': age,
-                    'salary': salary,
-                    'description': description,
-                    'platform_links': platform_links,
-                    'scraped_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                
-                # SECOND CHECK: Now do a full hash check with the complete data including description
-                if hash_store.is_duplicate(job_data):
-                    logger.debug(f"Skipping confirmed duplicate job after checking description: {title} at {company}")
+                # Final duplicate check with complete data
+                if hash_store.is_duplicate(detailed_info):
+                    logger.debug(f"Skipping confirmed duplicate after full check: '{job_title}' at '{job_company}'")
                     skipped_duplicates += 1
                     continue
                 
-                # Save this job incrementally to our single file
-                if save_job_incrementally(job_data, output_filename):
-                    jobs_count += 1  # Increment counter only on successful save
+                # Save job incrementally
+                if save_job_incrementally(detailed_info, output_filename):
+                    jobs_count += 1
+                    jobs_to_send.append(detailed_info)
+                    logger.info(f"Successfully processed job {jobs_count}: '{job_title}' at '{job_company}'")
+                else:
+                    logger.error(f"Failed to save job: '{job_title}' at '{job_company}'")
+                    continue
+                
                 # Check if we've reached the maximum number of jobs
                 if jobs_count >= MAX_JOBS_TO_SCRAPE:
-                    logger.info(f"Reached maximum job count ({jobs_count}), skipped {skipped_duplicates} duplicates")
-                    return
-                    
-                    
+                    logger.info(f"Reached maximum job count ({jobs_count})")
+                    break
+                
+                # # Process batch if it's full (fixed batch size)
+                # if len(jobs_to_send) >= BATCH_SIZE:
+                #     success = await process_job_batch(jobs_to_send)
+                #     if not success:
+                #         logger.warning("Batch processing failed, but continuing scraping")
+                #     jobs_to_send.clear()
+            
+            # Break if we've reached max jobs or received shutdown signal
+            if jobs_count >= MAX_JOBS_TO_SCRAPE or shutdown_flag:
+                break
+            
+            # Scroll down to load more jobs
+            logger.debug("Scrolling to load more jobs...")
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await human_sleep(SLEEP_SCROLL)
+            
+            # Check if new jobs were loaded
+            new_job_elements = await page.query_selector_all(JOB_CONTAINER_SELECTOR)
+            if len(new_job_elements) <= current_job_count:
+                scroll_attempts += 1
+                logger.debug(f"No new jobs loaded, scroll attempt {scroll_attempts}/{MAX_SCROLL_ATTEMPTS}")
+            else:
+                scroll_attempts = 0  # Reset counter if new jobs found
+                logger.debug(f"Found {len(new_job_elements) - current_job_count} new jobs after scrolling")
+        
+        # Send any remaining jobs
+        # if jobs_to_send and not shutdown_flag:
+        #     logger.info(f"Processing final batch of {len(jobs_to_send)} jobs")
+        #     success = await process_job_batch(jobs_to_send)
+        #     if not success:
+        #         logger.warning("Final batch processing failed")
+        
+        # Log final statistics
+        logger.info(f"Scraping completed! Summary:")
+        logger.info(f"  - Total jobs processed: {jobs_count}")
+        logger.info(f"  - Duplicates skipped: {skipped_duplicates}")
+        logger.info(f"  - Failed extractions: {failed_extractions}")
+        logger.info(f"  - Shutdown requested: {shutdown_flag}")
+        
+        # Upload to Google Drive
+        if jobs_count > 0 and output_filename and os.path.exists(output_filename):
+            try:
+                from google_drive_uploader import GoogleDriveUploader
+                
+                logger.info("Uploading results to Google Drive...")
+                uploader = GoogleDriveUploader()
+                
+                upload_result = uploader.upload_scraper_results(
+                    output_filename, 
+                    jobs_count, 
+                    skipped_duplicates, 
+                    failed_extractions
+                )
+                
+                if upload_result:
+                    logger.info("Upload successful!")
+                    logger.info(f"View file: {upload_result['main_file']['view_link']}")
+                else:
+                    logger.error("Upload failed")
             except Exception as e:
-                logger.error(f"Error scraping job: {e}")
+                logger.error(f"Google Drive upload error: {e}")
         
-        # Scroll down to load more jobs
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await human_sleep(SLEEP_SCROLL)  # Wait for new jobs to load
+        return jobs_count
         
-        # Check if we loaded new jobs after scrolling
-        new_job_elements = await page.query_selector_all(JOB_CONTAINER_SELECTOR)
-        if len(new_job_elements) <= current_job_count:
-            scroll_attempts += 1
-            logger.info(f"No new jobs loaded, attempt {scroll_attempts}/{MAX_SCROLL_ATTEMPTS}")
-        else:
-            # Reset counter if we found new jobs
-            scroll_attempts = 0
-        
-    
-    logger.info(f"Scraping completed! Found {jobs_count} jobs")
-    # return jobs
+    except Exception as e:
+        logger.error(f"Critical error in perform_scraping: {e}")
+        return None

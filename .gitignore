@@ -1,0 +1,6 @@
+trash
+
+.venv
+__pycache__
+.vscode
+*.log
