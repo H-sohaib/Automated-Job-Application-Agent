@@ -4,3 +4,5 @@ trash
 __pycache__
 .vscode
 *.log
+linkedin_cookies.json
+google_cookies.json

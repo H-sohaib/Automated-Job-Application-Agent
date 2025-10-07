@@ -8,7 +8,9 @@ import random
 import traceback
 
 # Import the scraping function from scraper.py
-from scraper import perform_scraping
+from google_scraper.scraper import perform_scraping
+# Import LinkedIn scraper (you'll need to create this)
+from linkedin_scraper.scraper import perform_linkedin_scraping
 
 # Set up logging
 logging.basicConfig(
@@ -20,6 +22,35 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+def display_menu():
+    """Display the main menu for scraper selection"""
+    print("\n" + "=" * 60)
+    print("           JOB SCRAPER TOOLKIT")
+    print("=" * 60)
+    print("Please select a scraper to run:")
+    print()
+    print("1. Google Jobs Scraper")
+    print("2. LinkedIn Saved Jobs Scraper")
+    print("3. Exit")
+    print()
+    print("=" * 60)
+
+def get_user_choice():
+    """Get and validate user choice"""
+    while True:
+        display_menu()
+        try:
+            choice = input("Enter your choice (1-3): ").strip()
+            if choice in ['1', '2', '3']:
+                return int(choice)
+            else:
+                print("\nInvalid choice! Please enter 1, 2, or 3.")
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            return 3
+        except Exception as e:
+            print(f"\nError reading input: {e}")
 
 async def save_cookies(context, filename='data/google_cookies.json'):
     """Save browser cookies to a file"""
@@ -60,7 +91,8 @@ def get_random_user_agent():
     ]
     return random.choice(user_agents)
 
-async def main():
+async def run_google_scraper():
+    """Run the Google Jobs scraper"""
     browser = None
     context = None 
     
@@ -131,13 +163,6 @@ async def main():
                 };
             """)
             
-            # # Navigate to Google first (not directly to jobs)
-            # logger.info("Navigating to Google homepage first")
-            # await page.goto("https://www.google.com", timeout=0)
-            
-            # # Wait a bit and then navigate to jobs
-            # await asyncio.sleep(random.uniform(2, 4))
-            
             logger.info("Navigating to Google Jobs search")
             await page.goto("https://www.google.com/search?q=software+engineer+jobs&ibp=htl;jobs&hl=en", timeout=0)
                         
@@ -161,9 +186,20 @@ async def main():
             else:
                 logger.warning("Scraping completed but no results returned")
             
+            # Keep browser open until user wants to close    
+            logger.info("=" * 60)
+            logger.info("Press Enter to close the browser and exit...")
+            # Wait for user input before closing browser
+            await asyncio.get_event_loop().run_in_executor(None, input)
+            
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
+        # Keep browser open until user wants to close    
+        logger.info("=" * 60)
+        logger.info("Press Enter to close the browser and exit...")
+        # Wait for user input before closing browser
+        await asyncio.get_event_loop().run_in_executor(None, input)
     finally:
         # Close browser if it's still open
         if browser:
@@ -172,6 +208,118 @@ async def main():
                 await browser.close()
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
+
+async def run_linkedin_scraper():
+    """Run the LinkedIn Saved Jobs scraper"""
+    browser = None
+    context = None
+    
+    try:
+        logger.info("Starting LinkedIn Saved Jobs scraper")
+        
+        # Initialize Stealth with Playwright
+        async with Stealth().use_async(async_playwright()) as p:
+            logger.info("Launching browser for LinkedIn scraping")
+            browser = await p.chromium.launch(
+                headless=False,
+                # args=[
+                #     '--no-first-run',
+                #     '--no-default-browser-check',
+                #     '--disable-blink-features=AutomationControlled',
+                #     '--disable-web-security',
+                #     '--disable-features=VizDisplayCompositor',
+                #     '--no-sandbox',
+                #     '--disable-setuid-sandbox'
+                # ]
+            )
+            
+            # Create context with realistic settings
+            context = await browser.new_context(
+                # viewport={'width': 1366, 'height': 768},
+                # user_agent=get_random_user_agent(),
+                # locale='en-US',
+                # timezone_id='Africa/Casablanca',
+                # extra_http_headers={
+                #     'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8,ar;q=0.7',
+                #     'Accept-Encoding': 'gzip, deflate, br',
+                #     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
+                # }
+            )
+            
+            page = await context.new_page()
+            
+            # Load LinkedIn cookies (separate from Google cookies)
+            await load_cookies(context, 'data/linkedin_cookies.json')
+            
+            # Navigate to LinkedIn
+            logger.info("Navigating to LinkedIn")
+            await page.goto("https://www.linkedin.com/my-items/saved-posts/", timeout=0)
+            
+            logger.info("LinkedIn page loaded. Please log in if needed.")
+            logger.info("Press Enter here to start scraping saved jobs...")
+            
+            # Wait for user to press Enter
+            await asyncio.get_event_loop().run_in_executor(None, input)
+            
+            # Save cookies after user interaction
+            logger.info("Saving LinkedIn cookies...")
+            # await save_cookies(context, 'data/linkedin_cookies.json')
+            
+            # Call the LinkedIn scraping function
+            logger.info("Starting LinkedIn scraping process")
+            results = await perform_linkedin_scraping(page)
+            
+            if results:
+                logger.info(f"LinkedIn scraping completed successfully! Processed {results} jobs")
+            else:
+                logger.warning("LinkedIn scraping completed but no results returned")
+            
+            # Keep browser open until user wants to close    
+            logger.info("=" * 60)
+            logger.info("Press Enter to close the browser and exit...")
+            await asyncio.get_event_loop().run_in_executor(None, input)
+            
+    except Exception as e:
+        logger.error(f"An error occurred during LinkedIn scraping: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        logger.info("=" * 60)
+        logger.info("Press Enter to close the browser and exit...")
+        await asyncio.get_event_loop().run_in_executor(None, input)
+    finally:
+        if browser:
+            try:
+                logger.info("Closing browser")
+                await browser.close()
+            except Exception as e:
+                logger.error(f"Error closing browser: {e}")
+
+async def main():
+    """Main function with menu selection"""
+    logger.info("Job Scraper Toolkit Starting...")
+    
+    while True:
+        try:
+            choice = get_user_choice()
+            
+            if choice == 1:
+                logger.info("User selected Google Jobs Scraper")
+                await run_google_scraper()
+                break
+            elif choice == 2:
+                logger.info("User selected LinkedIn Saved Jobs Scraper")
+                await run_linkedin_scraper()
+                break
+            elif choice == 3:
+                logger.info("User chose to exit")
+                break
+                
+        except KeyboardInterrupt:
+            logger.info("Script terminated by user (Ctrl+C)")
+            break
+        except Exception as e:
+            logger.error(f"Unexpected error in main menu: {e}")
+            print(f"\nAn error occurred: {e}")
+            print("Please try again or choose option 3 to exit.")
 
 # Run the main function
 if __name__ == "__main__":

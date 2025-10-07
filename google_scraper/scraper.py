@@ -9,7 +9,8 @@ import signal
 import sys
 import time
 from typing import List, Dict, Optional, Tuple
-from job_hash_store import JobHashStore
+# from job_hash_store import JobHashStore
+from ..utility.job_hash_store import JobHashStore
 import aiohttp
 from config import *
 
@@ -361,7 +362,10 @@ async def perform_scraping(page) -> Optional[int]:
         jobs_to_send = []
         scroll_attempts = 0
         
-        logger.info(f"Starting scraping loop - target: {MAX_JOBS_TO_SCRAPE} jobs, batch size: {BATCH_SIZE}, max scrolls: {MAX_SCROLL_ATTEMPTS}")
+        # Allow unlimited scraping when MAX_JOBS_TO_SCRAPE <= 0
+        job_limit = MAX_JOBS_TO_SCRAPE if MAX_JOBS_TO_SCRAPE > 0 else None
+        limit_str = job_limit if job_limit is not None else "unlimited"
+        logger.info(f"Starting scraping loop - target: {limit_str} jobs, max scrolls: {MAX_SCROLL_ATTEMPTS}")
         
         while scroll_attempts < MAX_SCROLL_ATTEMPTS and not shutdown_flag:
             # Get current job elements
@@ -428,7 +432,7 @@ async def perform_scraping(page) -> Optional[int]:
                     continue
                 
                 # Check if we've reached the maximum number of jobs
-                if jobs_count >= MAX_JOBS_TO_SCRAPE:
+                if job_limit is not None and jobs_count >= job_limit:
                     logger.info(f"Reached maximum job count ({jobs_count})")
                     break
                 
@@ -439,12 +443,12 @@ async def perform_scraping(page) -> Optional[int]:
                 #         logger.warning("Batch processing failed, but continuing scraping")
                 #     jobs_to_send.clear()
             
-            # Break if we've reached max jobs or received shutdown signal
-            if jobs_count >= MAX_JOBS_TO_SCRAPE or shutdown_flag:
-                break
+            # # Break if we've reached max jobs or received shutdown signal
+            # if jobs_count >= MAX_JOBS_TO_SCRAPE or shutdown_flag:
+            #     break
             
             # Scroll down to load more jobs
-            logger.debug("Scrolling to load more jobs...")
+            logger.info("Srolling to load more jobs...")
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await human_sleep(SLEEP_SCROLL)
             
@@ -452,10 +456,10 @@ async def perform_scraping(page) -> Optional[int]:
             new_job_elements = await page.query_selector_all(JOB_CONTAINER_SELECTOR)
             if len(new_job_elements) <= current_job_count:
                 scroll_attempts += 1
-                logger.debug(f"No new jobs loaded, scroll attempt {scroll_attempts}/{MAX_SCROLL_ATTEMPTS}")
+                logger.info(f"No new jobs loaded, scroll attempt {scroll_attempts}/{MAX_SCROLL_ATTEMPTS}")
             else:
                 scroll_attempts = 0  # Reset counter if new jobs found
-                logger.debug(f"Found {len(new_job_elements) - current_job_count} new jobs after scrolling")
+                logger.info(f"Found {len(new_job_elements) - current_job_count} new jobs after scrolling")
         
         # Send any remaining jobs
         # if jobs_to_send and not shutdown_flag:
@@ -474,7 +478,7 @@ async def perform_scraping(page) -> Optional[int]:
         # Upload to Google Drive
         if jobs_count > 0 and output_filename and os.path.exists(output_filename):
             try:
-                from google_drive_uploader import GoogleDriveUploader
+                from utility.google_drive_uploader import GoogleDriveUploader
                 
                 logger.info("Uploading results to Google Drive...")
                 uploader = GoogleDriveUploader()

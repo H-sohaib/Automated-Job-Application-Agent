@@ -4,6 +4,22 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# LinkedIn-specific CSS selectors extracted from the HTML - CORRECTED
+LINKEDIN_POST_CONTAINER_SELECTOR = '.NcGernYmxmskGJnBucgNmgRTilRzznfzmlQ'  # Fixed: This is the actual post container
+LINKEDIN_PERSON_NAME_SELECTOR = '.xUbuLQfVKIAOMTeBMIdcTRSTZMpBAjEtw a span[aria-hidden="true"]'  # Fixed selector
+LINKEDIN_PERSON_LINK_SELECTOR = '.xUbuLQfVKIAOMTeBMIdcTRSTZMpBAjEtw a'  # Fixed selector
+LINKEDIN_HEADING_SELECTOR = '.pIRiwRIcZciWGXugOmRnZtiLowJSOZXHaD'  # Fixed: This contains the person's heading
+# Fixed posted time selector - should target the time span specifically
+LINKEDIN_POST_TIME_SELECTOR = '.entity-result__content-actor p.t-black--light.t-12 span[aria-hidden="true"]'  # Fixed path
+LINKEDIN_POST_CONTENT_SELECTOR = '.entity-result__content-summary'  # This should work
+LINKEDIN_SEE_MORE_BUTTON_SELECTOR = '.reusable-search-show-more-link'  # This looks correct
+# Fixed post link selector - should get the actual feed link
+LINKEDIN_POST_LINK_SELECTOR = 'a[href*="/feed/update/urn:li:activity:"]'  # This should work
+# Additional LinkedIn selectors for post links
+LINKEDIN_POST_URN_SELECTOR = '[data-chameleon-result-urn]'  # This should work
+LINKEDIN_THREE_DOT_MENU_SELECTOR = '.feed-shared-control-menu__trigger'
+LINKEDIN_COPY_LINK_SELECTOR = 'div[data-control-name="copy_link"]'
+
 # CSS Selectors
 JOB_CONTAINER_SELECTOR = '.EimVGf'
 JOB_TITLE_SELECTOR = '.tNxQIb.PUpOsf'
@@ -17,9 +33,13 @@ SHOW_MORE_BUTTON_SELECTOR = 'div[jsname="G7vtgf"] div[role="button"]'
 ACTIVE_JOB_PANEL_SELECTOR = 'div.BIB1wf[style*="display: block"]'
 PLATFORM_LINKS_SELECTOR = '.nNzjpf-cS4Vcb-PvZLI-wxkYzf .yVRmze-s2gQvd a'
 
-# Configuration
-MAX_JOBS_TO_SCRAPE = 4
-MAX_SCROLL_ATTEMPTS = 10
+# LinkedIn Configuration
+STOP_AFTER_EXISTING_POSTS = 5  # Stop after finding this many consecutive existing posts
+MAX_POSTS_TO_SCRAPE = 0  # 0 means unlimited
+# google Jobs Configuration
+MAX_JOBS_TO_SCRAPE = 0
+# General Scraper Configuration
+MAX_SCROLL_ATTEMPTS = 3
 SCROLL_DELAY = 2  # seconds
 BATCH_SIZE = 5  # Initial batch size (will be adjusted dynamically)
 
