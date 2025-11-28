@@ -1,10 +1,10 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 import logging
 import os
 import random
-import time
 from typing import List, Dict, Optional, Tuple
 
 # Import from main config
@@ -53,6 +53,72 @@ def get_json_filename() -> str:
     """Generate a timestamp-based filename for the JSON output."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"data/linkedin_jobs/linkedin_jobs_{timestamp}.json"
+
+
+
+def estimate_posted_date(posted_str: str, scraped_date: str) -> str:
+    """
+    Convert relative time to approximate date for LinkedIn posts.
+    ALWAYS returns a valid date - uses scraped_date as fallback.
+    
+    Args:
+        posted_str: Relative time string (e.g., "2h", "3d", "1w")
+        scraped_date: Current scraped timestamp (format: "YYYY-MM-DD HH:MM:SS")
+        
+    Returns:
+        str: Estimated date in YYYY-MM-DD format (ALWAYS a valid date)
+    """
+    try:
+        # Parse scraped date first (this is our fallback)
+        scraped = datetime.strptime(scraped_date, "%Y-%m-%d %H:%M:%S")
+        scraped_date_only = scraped.strftime("%Y-%m-%d")
+        
+        # If posted_str is empty, None, or not a string, return scraped date
+        if not posted_str or not isinstance(posted_str, str) or posted_str.strip() == "":
+            logger.debug(f"No valid posted_str, using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        # If posted_str is "N/A" or similar, return scraped date
+        if posted_str.lower() in ['n/a', 'na', 'none', 'unknown', 'failed to extract']:
+            logger.debug(f"Posted_str is '{posted_str}', using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        # LinkedIn format: "2h", "3d", "1w", "2mo"
+        match = re.search(r'(\d+)\s*(h|d|w|mo|min)', posted_str.lower())
+        if not match:
+            logger.debug(f"Cannot parse '{posted_str}', using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        amount = int(match.group(1))
+        unit = match.group(2)
+        
+        # Calculate offset
+        if 'h' in unit:
+            offset = timedelta(hours=amount)
+        elif 'min' in unit:
+            offset = timedelta(minutes=amount)
+        elif 'd' in unit:
+            offset = timedelta(days=amount)
+        elif 'w' in unit:
+            offset = timedelta(weeks=amount)
+        elif 'mo' in unit:
+            offset = timedelta(days=amount * 30)
+        else:
+            logger.debug(f"Unknown unit '{unit}', using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        estimated = scraped - offset
+        estimated_str = estimated.strftime("%Y-%m-%d")
+        logger.debug(f"Estimated posted date: '{posted_str}' → {estimated_str}")
+        return estimated_str
+        
+    except Exception as e:
+        logger.warning(f"Error estimating posted date from '{posted_str}': {e}")
+        try:
+            scraped = datetime.strptime(scraped_date, "%Y-%m-%d %H:%M:%S")
+            return scraped.strftime("%Y-%m-%d")
+        except:
+            return datetime.now().strftime("%Y-%m-%d")
 
 def extract_post_id_from_link(post_link: str) -> Optional[str]:
     """Extract post ID from LinkedIn post link."""
@@ -343,11 +409,9 @@ async def extract_complete_post_info(page, post_element) -> Optional[Dict]:
         # Extract post ID from multiple sources
         post_id = None
         
-        # Method 1: Extract from post link
         if post_link and post_link != 'Failed to extract':
             post_id = extract_post_id_from_link(post_link)
         
-        # Method 2: Extract directly from URN attribute (fallback)
         if not post_id:
             try:
                 urn_element = await post_element.query_selector(LINKEDIN_POST_URN_SELECTOR)
@@ -358,14 +422,18 @@ async def extract_complete_post_info(page, post_element) -> Optional[Dict]:
             except:
                 pass
         
-        # Create complete post data
+        # Get scraped date first
+        scraped_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Create complete post data with estimated posted date
         post_data = {
             **person_info,
             'posted_time': post_time,
             'post_content': post_content,
             'post_link': post_link,
-            'post_id': post_id,  # Add the extracted post ID
-            'scraped_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            'post_id': post_id,
+            'scraped_date': scraped_date,
+            'estimated_posted_date': estimate_posted_date(post_time, scraped_date)  # ADD THIS LINE
         }
         
         # Log extraction results
@@ -377,7 +445,7 @@ async def extract_complete_post_info(page, post_element) -> Optional[Dict]:
             logger.warning(f"Post by '{person_name}': Failed to extract {failed_fields}")
         
         if not post_id:
-            logger.warning(f"Post by '{person_name}': Failed to extract post_id - duplicate detection may not work")
+            logger.warning(f"Post by '{person_name}': Failed to extract post_id")
         else:
             logger.debug(f"Successfully extracted all fields for post by '{person_name}' (ID: {post_id})")
         
@@ -478,7 +546,7 @@ async def perform_linkedin_scraping(page) -> Optional[int]:
                     # Smart stop condition: if we hit too many consecutive existing posts, stop
                     if consecutive_existing_posts >= STOP_AFTER_EXISTING_POSTS:
                         logger.info(f"Found {consecutive_existing_posts} consecutive already-scraped posts. Assuming all new posts have been processed. Stopping.")
-                        return posts_count
+                        break 
                     
                     continue  # Skip this post but continue processing
                 else:

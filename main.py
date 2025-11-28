@@ -213,6 +213,31 @@ async def run_google_scraper():
             logger.info(f"All keywords processed! Total jobs scraped: {total_jobs}")
             logger.info(f"Results saved to: {output_file}")
             logger.info(f"{'='*60}")
+
+            # Upload after all keywords are done:
+            if total_jobs > 0 and os.path.exists(output_file):
+                try:
+                    from utility.google_drive_uploader import GoogleDriveUploader
+                    
+                    logger.info("Uploading all results to Google Drive...")
+                    uploader = GoogleDriveUploader(scraper_type="google_jobs")
+                    
+                    # Note: We don't have per-keyword stats, so use total counts
+                    upload_result = uploader.upload_scraper_results(
+                        output_file, 
+                        total_jobs, 
+                        0,  # We don't track total skipped across keywords
+                        0   # We don't track total failed across keywords
+                    )
+                    
+                    if upload_result:
+                        logger.info("Upload successful!")
+                        logger.info(f"View file: {upload_result['main_file']['view_link']}")
+                    else:
+                        logger.error("Upload failed")
+                except Exception as e:
+                    logger.error(f"Google Drive upload error: {e}")
+            
             
             logger.info("Press Enter to close the browser and exit...")
             await asyncio.get_event_loop().run_in_executor(None, input)

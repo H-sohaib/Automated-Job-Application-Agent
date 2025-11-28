@@ -1,17 +1,14 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 import logging
 import os
-import pdb 
 import random 
 import signal
-import sys
-import time
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 # from job_hash_store import JobHashStore
 from utility.job_hash_store import JobHashStore
-import aiohttp
 from config import *
 
 # Set up logging for the scraper module
@@ -41,6 +38,74 @@ def random_sleep(range_tuple: Tuple[float, float]) -> float:
         float: Random duration between min and max values
     """
     return random.uniform(range_tuple[0], range_tuple[1])
+
+def estimate_posted_date(posted_str: str, scraped_date: str) -> str:
+    """
+    Convert relative time to approximate date.
+    ALWAYS returns a valid date - uses scraped_date as fallback.
+    
+    Args:
+        posted_str: Relative time string (e.g., "3 days ago", "2 weeks ago")
+        scraped_date: Current scraped timestamp (format: "YYYY-MM-DD HH:MM:SS")
+        
+    Returns:
+        str: Estimated date in YYYY-MM-DD format (ALWAYS a valid date)
+    """
+    try:
+        # Parse scraped date first (this is our fallback)
+        scraped = datetime.strptime(scraped_date, "%Y-%m-%d %H:%M:%S")
+        scraped_date_only = scraped.strftime("%Y-%m-%d")
+        
+        # If posted_str is empty, None, or not a string, return scraped date
+        if not posted_str or not isinstance(posted_str, str) or posted_str.strip() == "":
+            logger.debug(f"No valid posted_str, using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        # If posted_str is "N/A" or similar, return scraped date
+        if posted_str.lower() in ['n/a', 'na', 'none', 'unknown', 'failed to extract']:
+            logger.debug(f"Posted_str is '{posted_str}', using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        # Extract number and unit (e.g., "3 days ago" → 3, "days")
+        # Handles: "3 days ago", "2 weeks ago", "5h", "2d", etc.
+        match = re.search(r'(\d+)\s*(hour|day|week|month|h|d|w|m)s?', posted_str.lower())
+        if not match:
+            # Can't parse - return scraped date as fallback
+            logger.debug(f"Cannot parse '{posted_str}', using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        amount = int(match.group(1))
+        unit = match.group(2)
+        
+        # Calculate offset based on unit
+        if 'h' in unit:  # hour or h
+            offset = timedelta(hours=amount)
+        elif 'd' in unit:  # day or d
+            offset = timedelta(days=amount)
+        elif 'w' in unit:  # week or w
+            offset = timedelta(weeks=amount)
+        elif 'm' in unit:  # month or m
+            offset = timedelta(days=amount * 30)  # Approximate
+        else:
+            # Unknown unit - return scraped date
+            logger.debug(f"Unknown unit '{unit}' in '{posted_str}', using scraped date: {scraped_date_only}")
+            return scraped_date_only
+        
+        # Calculate estimated date
+        estimated = scraped - offset
+        estimated_str = estimated.strftime("%Y-%m-%d")
+        logger.debug(f"Estimated posted date: '{posted_str}' → {estimated_str}")
+        return estimated_str
+        
+    except Exception as e:
+        # ANY error: return scraped date as safe fallback
+        logger.warning(f"Error estimating posted date from '{posted_str}': {e}. Using scraped date.")
+        try:
+            scraped = datetime.strptime(scraped_date, "%Y-%m-%d %H:%M:%S")
+            return scraped.strftime("%Y-%m-%d")
+        except:
+            # Last resort: return today's date
+            return datetime.now().strftime("%Y-%m-%d")
 
 async def human_sleep(range_tuple: Tuple[float, float]) -> None:
     """
@@ -174,14 +239,6 @@ async def extract_basic_job_info(job_element) -> Optional[Dict]:
 async def extract_detailed_job_info(page, job_element, basic_info: Dict) -> Optional[Dict]:
     """
     Extract detailed job information by clicking on the job element.
-    
-    Args:
-        page: Playwright page object
-        job_element: Playwright element to click
-        basic_info: Basic job information already extracted
-        
-    Returns:
-        Dict or None: Complete job information or None if extraction fails
     """
     job_title = basic_info.get('title', 'Unknown')
     job_company = basic_info.get('company', 'Unknown')
@@ -230,12 +287,16 @@ async def extract_detailed_job_info(page, job_element, basic_info: Dict) -> Opti
             logger.warning(f"Could not find active job panel for '{job_title}' at '{job_company}'")
             description = "Failed to locate job details panel"
 
-        # Create complete job data
+        # Get scraped date first
+        scraped_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Create complete job data with estimated posted date
         job_data = {
             **basic_info,
             'description': description,
             'platform_links': platform_links,
-            'scraped_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            'scraped_date': scraped_date,
+            'estimated_posted_date': estimate_posted_date(basic_info.get('posted', ''), scraped_date)  # ADD THIS LINE
         }
         
         return job_data
@@ -243,7 +304,6 @@ async def extract_detailed_job_info(page, job_element, basic_info: Dict) -> Opti
     except Exception as e:
         logger.error(f"Error extracting detailed job info for '{job_title}' at '{job_company}': {e}")
         return None
-
 async def perform_scraping(page, output_filename: str = None, max_jobs_override: Optional[int] = None) -> Optional[int]:
     """
     Scrape job listings from Google Jobs search results with scrolling support.
@@ -392,29 +452,6 @@ async def perform_scraping(page, output_filename: str = None, max_jobs_override:
         logger.info(f"  - Duplicates skipped: {skipped_duplicates}")
         logger.info(f"  - Failed extractions: {failed_extractions}")
         logger.info(f"  - Shutdown requested: {shutdown_flag}")
-        
-        # Upload to Google Drive
-        if jobs_count > 0 and output_filename and os.path.exists(output_filename):
-            try:
-                from utility.google_drive_uploader import GoogleDriveUploader
-                
-                logger.info("Uploading results to Google Drive...")
-                uploader = GoogleDriveUploader(scraper_type="google_jobs")
-                
-                upload_result = uploader.upload_scraper_results(
-                    output_filename, 
-                    jobs_count, 
-                    skipped_duplicates, 
-                    failed_extractions
-                )
-                
-                if upload_result:
-                    logger.info("Upload successful!")
-                    logger.info(f"View file: {upload_result['main_file']['view_link']}")
-                else:
-                    logger.error("Upload failed")
-            except Exception as e:
-                logger.error(f"Google Drive upload error: {e}")
         
         return jobs_count
         

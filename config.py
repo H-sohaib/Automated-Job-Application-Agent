@@ -6,7 +6,7 @@ load_dotenv()
 
 # Testing Configuration
 TESTING_MODE = True     # Set to True to enable testing mode (disables hash storage)
-MAX_JOBS_TO_SCRAPE = 5 if TESTING_MODE else 0  # 0 means unlimited
+MAX_JOBS_TO_SCRAPE = 3 if TESTING_MODE else 0  # 0 means unlimited
 MAX_POSTS_TO_SCRAPE = MAX_JOBS_TO_SCRAPE  # 0 means unlimited
 
 JOB_SEARCH_KEYWORDS = [
