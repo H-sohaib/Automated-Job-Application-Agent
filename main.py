@@ -11,6 +11,8 @@ import traceback
 from google_scraper.scraper import perform_scraping
 # Import LinkedIn scraper (you'll need to create this)
 from linkedin_scraper.scraper import perform_linkedin_scraping
+from config import JOB_SEARCH_KEYWORDS , MAX_JOBS_TO_SCRAPE
+
 
 # Set up logging
 logging.basicConfig(
@@ -99,9 +101,7 @@ async def run_google_scraper():
     try:
         logger.info("Starting Google Jobs scraper with enhanced stealth")
         
-        # Initialize Stealth with Playwright (using the correct syntax)
         async with Stealth().use_async(async_playwright()) as p:
-            # Launch browser with enhanced stealth settings
             logger.info("Launching browser with stealth settings")
             browser = await p.chromium.launch(
                 headless=False,
@@ -118,16 +118,15 @@ async def run_google_scraper():
                 ]
             )
             
-            # Create context with realistic settings
             context = await browser.new_context(
                 viewport={'width': 1366, 'height': 768},
                 user_agent=get_random_user_agent(),
-                locale='en-US',  # Keep English locale for interface
-                timezone_id='Africa/Casablanca',  # Morocco timezone
+                locale='en-US',
+                timezone_id='Africa/Casablanca',
                 permissions=['geolocation'],
-                geolocation={'latitude': 33.5731, 'longitude': -7.5898},  # Casablanca coordinates
+                geolocation={'latitude': 33.5731, 'longitude': -7.5898},
                 extra_http_headers={
-                    'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8,ar;q=0.7',  # English first, then French/Arabic
+                    'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8,ar;q=0.7',
                     'Accept-Encoding': 'gzip, deflate, br',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
                     'Upgrade-Insecure-Requests': '1',
@@ -138,13 +137,10 @@ async def run_google_scraper():
                 }
             )
             
-            # Create page (stealth is already applied through Stealth().use_async())
             page = await context.new_page()
             
-            # Load existing cookies
             await load_cookies(context)
             
-            # Add additional stealth JavaScript
             await page.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', {
                     get: () => undefined,
@@ -166,42 +162,67 @@ async def run_google_scraper():
             logger.info("Navigating to Google Jobs search")
             await page.goto("https://www.google.com/search?q=software+engineer+jobs&ibp=htl;jobs&hl=en", timeout=0)
                         
-            logger.info("Browser is ready. You can:")
-            logger.info("2. Navigate to your desired job search")
-            logger.info("3. Press Enter here to start scraping...")
-            
-            # Wait for user to press Enter
+            logger.info("Browser is ready. Solve CAPTCHA if needed, then press Enter to start scraping...")
             await asyncio.get_event_loop().run_in_executor(None, input)
             
-            # Save cookies after user interaction
-            logger.info("Saving cookies after user interaction...")
             await save_cookies(context)
             
-            # Call the scraping function
-            logger.info("Starting scraping process")
-            results = await perform_scraping(page)
+            # Create single output file for all keywords
+            from google_scraper.scraper import get_json_filename
+            output_file = get_json_filename()
+            logger.info(f"All jobs will be saved to: {output_file}")
             
-            if results:
-                logger.info(f"Scraping completed successfully! Processed {results} jobs")
-            else:
-                logger.warning("Scraping completed but no results returned")
+            total_jobs = 0
+            # REMOVE THIS LINE:
+            # total_limit = MAX_JOBS_TO_SCRAPE if MAX_JOBS_TO_SCRAPE > 0 else None
             
-            # Keep browser open until user wants to close    
-            logger.info("=" * 60)
+            # Loop through keywords
+            for idx, keyword in enumerate(JOB_SEARCH_KEYWORDS, 1):
+                # REMOVE THIS CHECK:
+                # if total_limit is not None and total_jobs >= total_limit:
+                #     logger.info(f"Reached global job limit ({total_limit}). Stopping.")
+                #     break
+                
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Processing keyword {idx}/{len(JOB_SEARCH_KEYWORDS)}: '{keyword}'")
+                logger.info(f"Progress: {total_jobs} total jobs scraped so far")  # CHANGED THIS LINE
+                logger.info(f"{'='*60}")
+                
+                # Navigate to search URL for this keyword
+                search_url = f"https://www.google.com/search?q={keyword.replace(' ', '+')}+jobs&ibp=htl;jobs&hl=en"
+                await page.goto(search_url, timeout=0)
+                await asyncio.sleep(2)  # Wait for page load
+                
+                # REMOVE THESE LINES:
+                # remaining_jobs = None
+                # if total_limit is not None:
+                #     remaining_jobs = total_limit - total_jobs
+                #     if remaining_jobs <= 0:
+                #         break
+                
+                # CHANGE THIS LINE - remove remaining_jobs parameter (let it use config):
+                results = await perform_scraping(page, output_file)
+                
+                if results:
+                    total_jobs += results
+                    logger.info(f"Completed '{keyword}': {results} jobs scraped (total: {total_jobs})")
+                else:
+                    logger.warning(f"No results for keyword: '{keyword}'")
+            
+            logger.info(f"\n{'='*60}")
+            logger.info(f"All keywords processed! Total jobs scraped: {total_jobs}")
+            logger.info(f"Results saved to: {output_file}")
+            logger.info(f"{'='*60}")
+            
             logger.info("Press Enter to close the browser and exit...")
-            # Wait for user input before closing browser
             await asyncio.get_event_loop().run_in_executor(None, input)
             
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
-        # Keep browser open until user wants to close    
-        logger.info("=" * 60)
         logger.info("Press Enter to close the browser and exit...")
-        # Wait for user input before closing browser
         await asyncio.get_event_loop().run_in_executor(None, input)
     finally:
-        # Close browser if it's still open
         if browser:
             try:
                 logger.info("Closing browser")
@@ -304,13 +325,18 @@ async def main():
             if choice == 1:
                 logger.info("User selected Google Jobs Scraper")
                 await run_google_scraper()
-                break
+                # Don't break here - go back to menu
+                print("\nGoogle Jobs Scraper completed. Returning to main menu...")
+                
             elif choice == 2:
                 logger.info("User selected LinkedIn Saved Jobs Scraper")
                 await run_linkedin_scraper()
-                break
+                # Don't break here - go back to menu
+                print("\nLinkedIn Scraper completed. Returning to main menu...")
+                
             elif choice == 3:
                 logger.info("User chose to exit")
+                print("\nGoodbye! 👋")
                 break
                 
         except KeyboardInterrupt:
@@ -319,7 +345,7 @@ async def main():
         except Exception as e:
             logger.error(f"Unexpected error in main menu: {e}")
             print(f"\nAn error occurred: {e}")
-            print("Please try again or choose option 3 to exit.")
+            print("Returning to main menu...")
 
 # Run the main function
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class JobHashStore:
     """Manages a database of job hashes to prevent duplicate scraping."""
     
-    def __init__(self, db_path='data/job_hashes.db', expiry_days=30):
+    def __init__(self, db_path='data/job_hashes.db', expiry_days=30 , read_only=False):
         """
         Initialize the job hash store.
         
@@ -19,8 +19,12 @@ class JobHashStore:
         """
         self.db_path = db_path
         self.expiry_days = expiry_days
+        self.read_only = read_only
         self._ensure_dir_exists()
         self._init_db()
+        
+        if self.read_only:
+            logger.info("JobHashStore initialized in READ-ONLY mode - no new hashes will be stored")
     
     def _ensure_dir_exists(self):
         """Ensure the directory for the database exists."""
@@ -123,20 +127,24 @@ class JobHashStore:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             if result:
-                # Update the last_seen timestamp
-                cursor.execute(
-                    "UPDATE job_hashes SET last_seen = ? WHERE hash = ?", 
-                    (now, full_hash)
-                )
-                conn.commit()
+                # Update the last_seen timestamp only if not in read-only mode
+                if not self.read_only:
+                    cursor.execute(
+                        "UPDATE job_hashes SET last_seen = ? WHERE hash = ?", 
+                        (now, full_hash)
+                    )
+                    conn.commit()
                 return True
             else:
-                # Insert new hash
-                cursor.execute(
-                    "INSERT INTO job_hashes (hash, first_seen, last_seen, title, company, location, basic_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (full_hash, now, now, job_data['title'], job_data['company'], job_data['location'], basic_hash)
-                )
-                conn.commit()
+                # Insert new hash only if not in read-only mode
+                if not self.read_only:
+                    cursor.execute(
+                        "INSERT INTO job_hashes (hash, first_seen, last_seen, title, company, location, basic_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (full_hash, now, now, job_data['title'], job_data['company'], job_data['location'], basic_hash)
+                    )
+                    conn.commit()
+                else:
+                    logger.debug(f"READ-ONLY mode: Would have stored new job hash for '{job_data['title']}' at '{job_data['company']}'")
                 return False
         finally:
             conn.close()

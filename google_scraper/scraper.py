@@ -10,7 +10,7 @@ import sys
 import time
 from typing import List, Dict, Optional, Tuple
 # from job_hash_store import JobHashStore
-from ..utility.job_hash_store import JobHashStore
+from utility.job_hash_store import JobHashStore
 import aiohttp
 from config import *
 
@@ -61,7 +61,7 @@ def get_json_filename() -> str:
         str: Formatted filename with timestamp
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"data/jobs/jobs_{timestamp}.json"
+    return f"data/google_jobs/google_jobs_{timestamp}.json"
 
 def save_job_incrementally(job_data: Dict, filename: str) -> bool:
     """
@@ -115,63 +115,6 @@ def save_job_incrementally(job_data: Dict, filename: str) -> bool:
     except Exception as e:
         logger.error(f"Unexpected error saving job '{job_title}' at '{job_company}' to {filename}: {e}")
         return False
-
-# async def send_jobs_to_n8n_with_retry(jobs: List[Dict], max_retries: int = 3, base_delay: float = 1.0) -> bool:
-#     """
-#     Send jobs to n8n webhook with retry logic and exponential backoff.
-    
-#     Args:
-#         jobs: List of job dictionaries to send
-#         max_retries: Maximum number of retry attempts
-#         base_delay: Base delay for exponential backoff
-        
-#     Returns:
-#         bool: True if successful, False otherwise
-#     """
-#     n8n_webhook_url = N8N_WEBHOOK_URL
-#     headers = {
-#         'Authorization': N8N_AUTH_TOKEN,
-#         'Content-Type': 'application/json'
-#     }
-    
-#     job_titles = [job.get('title', 'Unknown') for job in jobs]
-#     logger.debug(f"Attempting to send {len(jobs)} jobs to n8n: {job_titles[:3]}{'...' if len(job_titles) > 3 else ''}")
-    
-#     for attempt in range(max_retries + 1):
-#         try:
-#             start_time = time.time()
-            
-#             async with aiohttp.ClientSession() as session:
-#                 async with session.post(
-#                     n8n_webhook_url, 
-#                     json=jobs, 
-#                     headers=headers,
-#                     timeout=aiohttp.ClientTimeout(total=30)
-#                 ) as response:
-#                     response_time = time.time() - start_time
-                    
-#                     if response.status == 200:
-#                         logger.info(f"Successfully sent {len(jobs)} jobs to n8n in {response_time:.2f}s (attempt {attempt + 1})")
-#                         return True
-#                     else:
-#                         response_text = await response.text()
-#                         logger.warning(f"n8n webhook returned status {response.status} on attempt {attempt + 1}: {response_text}")
-                        
-#         except asyncio.TimeoutError:
-#             logger.warning(f"Timeout sending jobs to n8n on attempt {attempt + 1}")
-#         except aiohttp.ClientError as e:
-#             logger.warning(f"Client error sending jobs to n8n on attempt {attempt + 1}: {e}")
-#         except Exception as e:
-#             logger.error(f"Unexpected error sending jobs to n8n on attempt {attempt + 1}: {e}")
-        
-#         # Don't wait after the last attempt
-#         if attempt < max_retries:
-#             delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-#             logger.debug(f"Retrying in {delay:.2f} seconds...")
-#             await asyncio.sleep(delay)
-    
-#     logger.error(f"Failed to send {len(jobs)} jobs to n8n after {max_retries + 1} attempts")
-#     return False
 
 async def extract_basic_job_info(job_element) -> Optional[Dict]:
     """
@@ -301,30 +244,14 @@ async def extract_detailed_job_info(page, job_element, basic_info: Dict) -> Opti
         logger.error(f"Error extracting detailed job info for '{job_title}' at '{job_company}': {e}")
         return None
 
-# async def process_job_batch(jobs_batch: List[Dict]) -> bool:
-#     """
-#     Process a batch of jobs by sending them to n8n with fixed batch size.
-    
-#     Args:
-#         jobs_batch: List of job dictionaries to process
-        
-#     Returns:
-#         bool: True if successful, False otherwise
-#     """
-#     if not jobs_batch:
-#         return True
-    
-#     job_titles = [job.get('title', 'Unknown') for job in jobs_batch]
-#     logger.info(f"Processing batch of {len(jobs_batch)} jobs: {job_titles[:2]}{'...' if len(job_titles) > 2 else ''}")
-    
-#     return await send_jobs_to_n8n_with_retry(jobs_batch)
-
-async def perform_scraping(page) -> Optional[int]:
+async def perform_scraping(page, output_filename: str = None, max_jobs_override: Optional[int] = None) -> Optional[int]:
     """
     Scrape job listings from Google Jobs search results with scrolling support.
     
     Args:
         page: The Playwright page object to use for scraping
+        output_filename: Optional filename to save results
+        max_jobs_override: Optional override for max jobs (used for multi-keyword scraping)
         
     Returns:
         int or None: Number of jobs scraped, or None if scraping failed
@@ -335,15 +262,18 @@ async def perform_scraping(page) -> Optional[int]:
     
     try:
         # Initialize the job hash store
-        hash_store = JobHashStore()
+        read_only_mode = TESTING_MODE
+        hash_store = JobHashStore(read_only=read_only_mode)
         hash_store.cleanup_expired()
+        if read_only_mode:
+            logger.warning("Hash storage is DISABLED - running in testing mode")
         
-        # Get hash store stats for logging
         stats = hash_store.get_stats()
-        logger.info(f"Job hash store initialized - {stats['total_jobs_tracked']} jobs tracked, oldest from {stats['oldest_job_date']}")
+        logger.info(f"Job hash store initialized - {stats['total_jobs_tracked']} jobs tracked")
         
-        # Create output filename
-        output_filename = get_json_filename()
+        # Use provided filename or create new one
+        if not output_filename:
+            output_filename = get_json_filename()
         logger.info(f"Jobs will be saved to: {output_filename}")
         
         # Wait for job listings to load
@@ -362,8 +292,8 @@ async def perform_scraping(page) -> Optional[int]:
         jobs_to_send = []
         scroll_attempts = 0
         
-        # Allow unlimited scraping when MAX_JOBS_TO_SCRAPE <= 0
-        job_limit = MAX_JOBS_TO_SCRAPE if MAX_JOBS_TO_SCRAPE > 0 else None
+        # Use override if provided, otherwise use config
+        job_limit = max_jobs_override if max_jobs_override is not None else (MAX_JOBS_TO_SCRAPE if MAX_JOBS_TO_SCRAPE > 0 else None)
         limit_str = job_limit if job_limit is not None else "unlimited"
         logger.info(f"Starting scraping loop - target: {limit_str} jobs, max scrolls: {MAX_SCROLL_ATTEMPTS}")
         
@@ -375,6 +305,7 @@ async def perform_scraping(page) -> Optional[int]:
             logger.debug(f"Found {current_job_count} job elements on page (scroll attempt {scroll_attempts})")
             
             # Process visible jobs
+            job_limit_reached = False  # Add flag to track if limit was reached
             for job_element in job_elements:
                 if shutdown_flag:
                     logger.warning("Shutdown signal received, stopping job processing")
@@ -434,21 +365,15 @@ async def perform_scraping(page) -> Optional[int]:
                 # Check if we've reached the maximum number of jobs
                 if job_limit is not None and jobs_count >= job_limit:
                     logger.info(f"Reached maximum job count ({jobs_count})")
+                    job_limit_reached = True
                     break
-                
-                # # Process batch if it's full (fixed batch size)
-                # if len(jobs_to_send) >= BATCH_SIZE:
-                #     success = await process_job_batch(jobs_to_send)
-                #     if not success:
-                #         logger.warning("Batch processing failed, but continuing scraping")
-                #     jobs_to_send.clear()
             
-            # # Break if we've reached max jobs or received shutdown signal
-            # if jobs_count >= MAX_JOBS_TO_SCRAPE or shutdown_flag:
-            #     break
+            # Break out of outer loop if job limit reached or shutdown requested
+            if job_limit_reached or shutdown_flag:
+                break
             
             # Scroll down to load more jobs
-            logger.info("Srolling to load more jobs...")
+            logger.info("Scrolling to load more jobs...")
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await human_sleep(SLEEP_SCROLL)
             
@@ -460,13 +385,6 @@ async def perform_scraping(page) -> Optional[int]:
             else:
                 scroll_attempts = 0  # Reset counter if new jobs found
                 logger.info(f"Found {len(new_job_elements) - current_job_count} new jobs after scrolling")
-        
-        # Send any remaining jobs
-        # if jobs_to_send and not shutdown_flag:
-        #     logger.info(f"Processing final batch of {len(jobs_to_send)} jobs")
-        #     success = await process_job_batch(jobs_to_send)
-        #     if not success:
-        #         logger.warning("Final batch processing failed")
         
         # Log final statistics
         logger.info(f"Scraping completed! Summary:")
@@ -481,7 +399,7 @@ async def perform_scraping(page) -> Optional[int]:
                 from utility.google_drive_uploader import GoogleDriveUploader
                 
                 logger.info("Uploading results to Google Drive...")
-                uploader = GoogleDriveUploader()
+                uploader = GoogleDriveUploader(scraper_type="google_jobs")
                 
                 upload_result = uploader.upload_scraper_results(
                     output_filename, 

@@ -4,21 +4,40 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# LinkedIn-specific CSS selectors extracted from the HTML - CORRECTED
-LINKEDIN_POST_CONTAINER_SELECTOR = '.NcGernYmxmskGJnBucgNmgRTilRzznfzmlQ'  # Fixed: This is the actual post container
-LINKEDIN_PERSON_NAME_SELECTOR = '.xUbuLQfVKIAOMTeBMIdcTRSTZMpBAjEtw a span[aria-hidden="true"]'  # Fixed selector
-LINKEDIN_PERSON_LINK_SELECTOR = '.xUbuLQfVKIAOMTeBMIdcTRSTZMpBAjEtw a'  # Fixed selector
-LINKEDIN_HEADING_SELECTOR = '.pIRiwRIcZciWGXugOmRnZtiLowJSOZXHaD'  # Fixed: This contains the person's heading
-# Fixed posted time selector - should target the time span specifically
-LINKEDIN_POST_TIME_SELECTOR = '.entity-result__content-actor p.t-black--light.t-12 span[aria-hidden="true"]'  # Fixed path
-LINKEDIN_POST_CONTENT_SELECTOR = '.entity-result__content-summary'  # This should work
-LINKEDIN_SEE_MORE_BUTTON_SELECTOR = '.reusable-search-show-more-link'  # This looks correct
-# Fixed post link selector - should get the actual feed link
-LINKEDIN_POST_LINK_SELECTOR = 'a[href*="/feed/update/urn:li:activity:"]'  # This should work
-# Additional LinkedIn selectors for post links
-LINKEDIN_POST_URN_SELECTOR = '[data-chameleon-result-urn]'  # This should work
-LINKEDIN_THREE_DOT_MENU_SELECTOR = '.feed-shared-control-menu__trigger'
-LINKEDIN_COPY_LINK_SELECTOR = 'div[data-control-name="copy_link"]'
+# Testing Configuration
+TESTING_MODE = True     # Set to True to enable testing mode (disables hash storage)
+MAX_JOBS_TO_SCRAPE = 5 if TESTING_MODE else 0  # 0 means unlimited
+MAX_POSTS_TO_SCRAPE = MAX_JOBS_TO_SCRAPE  # 0 means unlimited
+
+JOB_SEARCH_KEYWORDS = [
+    "software engineer intern",
+    # "backend developer intern", 
+    # "full stack developer intern",
+    # "stage web developeur",
+    "stage en informatique",
+    # "python developer intern",
+    # Add more keywords here
+]
+
+# LinkedIn Configuration
+STOP_AFTER_EXISTING_POSTS = 5  # Stop after finding this many consecutive existing posts
+# General Scraper Configuration
+MAX_SCROLL_ATTEMPTS = 3
+SCROLL_DELAY = 2  # seconds
+BATCH_SIZE = 5  # Initial batch size (will be adjusted dynamically)
+
+# LinkedIn-specific CSS selectors - CORRECTED based on HTML structure
+LINKEDIN_POST_CONTAINER_SELECTOR = 'li.csImSlkPixlwooCPrzjuMicprhYXhJsJAF'  # Each post item
+LINKEDIN_PERSON_NAME_SELECTOR = '.ZtBUfPYEDJpgsPBTEsevFDcMIPKruvsuYY.t-16 a'  # Person/Company name link
+LINKEDIN_PERSON_LINK_SELECTOR = '.entity-result__content-image a'  # Profile/Company link (simplified)
+LINKEDIN_HEADING_SELECTOR = '.eXEuNfjOurYHSiCLZwEVjqbaNvuRuBzwnNI.t-14.t-black.t-normal'  # Person's title/company or follower count
+LINKEDIN_POST_TIME_SELECTOR = 'p.t-black--light.t-12 span[aria-hidden="true"]'  # Posted time (e.g., "2d •")
+LINKEDIN_POST_CONTENT_SELECTOR = 'p.relative.entity-result__content-summary'  # Post text content (simplified to match both classes)
+LINKEDIN_SEE_MORE_BUTTON_SELECTOR = 'button.reusable-search-show-more-link'  # "see more" button
+LINKEDIN_POST_LINK_SELECTOR = '.TanvNKAVOapYdcCLlDucVvwxoFygLerZBSUM a[href*="/feed/update/"]'  # Direct post link
+LINKEDIN_POST_URN_SELECTOR = 'div[data-chameleon-result-urn]'  # URN attribute container
+LINKEDIN_THREE_DOT_MENU_SELECTOR = 'button.entity-result__overflow-actions-trigger'  # Three-dot menu button (simplified)
+LINKEDIN_COPY_LINK_SELECTOR = 'div[data-control-name="copy_link"]'  # Not visible in saved posts view
 
 # CSS Selectors
 JOB_CONTAINER_SELECTOR = '.EimVGf'
@@ -33,19 +52,27 @@ SHOW_MORE_BUTTON_SELECTOR = 'div[jsname="G7vtgf"] div[role="button"]'
 ACTIVE_JOB_PANEL_SELECTOR = 'div.BIB1wf[style*="display: block"]'
 PLATFORM_LINKS_SELECTOR = '.nNzjpf-cS4Vcb-PvZLI-wxkYzf .yVRmze-s2gQvd a'
 
-# LinkedIn Configuration
-STOP_AFTER_EXISTING_POSTS = 5  # Stop after finding this many consecutive existing posts
-MAX_POSTS_TO_SCRAPE = 0  # 0 means unlimited
-# google Jobs Configuration
-MAX_JOBS_TO_SCRAPE = 0
-# General Scraper Configuration
-MAX_SCROLL_ATTEMPTS = 3
-SCROLL_DELAY = 2  # seconds
-BATCH_SIZE = 5  # Initial batch size (will be adjusted dynamically)
 
-# n8n Configuration (from environment variables)
-N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL', 'https://n8n.sohaib-engineer.tech/webhook-test/jobs-webhook')
+# n8n Configuration (from environment variables with testing mode support)
+# Google Jobs Scraper URLs
+GOOGLE_JOBS_WEBHOOK_URL_PROD = 'https://n8n.sohaib-engineer.tech/webhook/n8n-webhook'
+GOOGLE_JOBS_WEBHOOK_URL_TEST = 'https://n8n.sohaib-engineer.tech/webhook-test/n8n-webhook'
+
+# LinkedIn Scraper URLs  
+LINKEDIN_WEBHOOK_URL_PROD = GOOGLE_JOBS_WEBHOOK_URL_PROD
+LINKEDIN_WEBHOOK_URL_TEST = GOOGLE_JOBS_WEBHOOK_URL_TEST
+
+# Use test or prod URLs based on TESTING_MODE
+GOOGLE_JOBS_WEBHOOK_URL =  GOOGLE_JOBS_WEBHOOK_URL_PROD
+LINKEDIN_WEBHOOK_URL = LINKEDIN_WEBHOOK_URL_PROD
+
+# Keep the old N8N_WEBHOOK_URL for backward compatibility (defaults to Google Jobs)
+N8N_WEBHOOK_URL = GOOGLE_JOBS_WEBHOOK_URL
 N8N_AUTH_TOKEN = os.getenv('N8N_AUTH_TOKEN', 'Goblin123/@')
+
+
+# Webhook retry configuration
+MAX_RETRIES = 5
 
 # Google Drive Configuration (from environment variables)
 GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID', '1zE5YJNxzvjSIB_BdbLH556g6Tqeuj6Eq')  # Your Drive folder ID

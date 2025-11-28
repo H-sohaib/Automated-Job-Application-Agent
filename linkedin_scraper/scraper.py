@@ -52,7 +52,7 @@ async def human_sleep(range_tuple: Tuple[float, float]) -> None:
 def get_json_filename() -> str:
     """Generate a timestamp-based filename for the JSON output."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"data/linkedin_posts/linkedin_posts_{timestamp}.json"
+    return f"data/linkedin_jobs/linkedin_jobs_{timestamp}.json"
 
 def extract_post_id_from_link(post_link: str) -> Optional[str]:
     """Extract post ID from LinkedIn post link."""
@@ -84,7 +84,7 @@ def save_post_incrementally(post_data: Dict, filename: str) -> bool:
     if not post_id:
         logger.warning(f"Post by '{person_name}' has no post_id, cannot check for duplicates")
         # Still save it but without duplicate protection
-    else:
+    elif not TESTING_MODE:  # Only check duplicates if not in testing mode
         # Load existing scraped IDs
         scraped_ids = load_scraped_ids()
         
@@ -92,6 +92,8 @@ def save_post_incrementally(post_data: Dict, filename: str) -> bool:
         if post_id in scraped_ids:
             logger.info(f"Post by '{person_name}' with ID '{post_id}' has already been scraped. Skipping.")
             return False  # Skip saving if already scraped
+    else:
+        logger.debug(f"TESTING_MODE enabled - skipping duplicate check for post ID '{post_id}'")
     
     try:
         # Ensure directory exists
@@ -117,9 +119,11 @@ def save_post_incrementally(post_data: Dict, filename: str) -> bool:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(posts, f, ensure_ascii=False, indent=2)
         
-        # Save the new post ID to the scraped IDs file (only if we have an ID)
-        if post_id:
+        # Save the new post ID to the scraped IDs file (only if we have an ID and not in testing mode)
+        if post_id and not TESTING_MODE:
             save_scraped_id(post_id)
+        elif post_id and TESTING_MODE:
+            logger.debug(f"TESTING_MODE enabled - not saving post ID '{post_id}' to duplicate tracker")
         
         logger.info(f"Successfully saved post by '{person_name}' to {filename} (total: {len(posts)} posts)")
         return True
@@ -402,9 +406,13 @@ async def perform_linkedin_scraping(page) -> Optional[int]:
         output_filename = get_json_filename()
         logger.info(f"LinkedIn posts will be saved to: {output_filename}")
         
-        # Load existing scraped IDs for smart stop condition
-        scraped_ids = load_scraped_ids()
-        logger.info(f"Loaded {len(scraped_ids)} previously scraped post IDs")
+        # Load existing scraped IDs for smart stop condition (only if not in testing mode)
+        scraped_ids = set()
+        if not TESTING_MODE:
+            scraped_ids = load_scraped_ids()
+            logger.info(f"Loaded {len(scraped_ids)} previously scraped post IDs")
+        else:
+            logger.info("TESTING_MODE enabled - duplicate detection disabled")
         
         # Wait for post listings to load
         try:
@@ -488,7 +496,7 @@ async def perform_linkedin_scraping(page) -> Optional[int]:
                 # Check if we've reached the maximum number of posts
                 if post_limit is not None and posts_count >= post_limit:
                     logger.info(f"Reached maximum post count ({posts_count})")
-                    return posts_count
+                    break
                 
                 # Add small delay between posts
                 await human_sleep(SLEEP_SHORT)
@@ -517,6 +525,30 @@ async def perform_linkedin_scraping(page) -> Optional[int]:
         logger.info(f"  - Failed extractions: {failed_extractions}")
         logger.info(f"  - Consecutive existing posts at end: {consecutive_existing_posts}")
         logger.info(f"  - Shutdown requested: {shutdown_flag}")
+        
+        # Upload to Google Drive and trigger webhook
+        if posts_count > 0 and output_filename and os.path.exists(output_filename):
+            try:
+                from utility.google_drive_uploader import GoogleDriveUploader
+                
+                logger.info("Uploading LinkedIn results to Google Drive...")
+                uploader = GoogleDriveUploader(scraper_type="linkedin_posts")
+                
+                upload_result = uploader.upload_scraper_results(
+                    output_filename, 
+                    posts_count, 
+                    0,  # No duplicates tracking for LinkedIn (yet)
+                    failed_extractions,
+                )
+                
+                if upload_result:
+                    logger.info("Upload successful!")
+                    logger.info(f"View file: {upload_result['main_file']['view_link']}")
+                else:
+                    logger.error("Upload failed")
+            except Exception as e:
+                logger.error(f"Google Drive upload error: {e}")
+        
         
         return posts_count
         

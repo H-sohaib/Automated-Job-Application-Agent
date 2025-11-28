@@ -1,16 +1,13 @@
 import os
-import json
 import pickle
 from datetime import datetime
 import logging
-import time
 from typing import Optional, Dict, Any
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build, Resource
-from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
+from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
-import io
 from config import SCOPES, GOOGLE_DRIVE_FOLDER_ID, GOOGLE_DRIVE_CREDENTIALS_PATH
 from utility.webhook_notifier import WebhookNotifier
 
@@ -19,17 +16,18 @@ logger = logging.getLogger(__name__)
 class GoogleDriveUploader:
     """Simple Google Drive uploader for scraper results with retry mechanism"""
     
-    def __init__(self):
+    def __init__(self, scraper_type: str = "google_jobs"):
         self.service: Optional[Resource] = None
         self.folder_id = GOOGLE_DRIVE_FOLDER_ID
         self.token_path = 'data/google_drive_token.pickle'
-        self.webhook_notifier = WebhookNotifier()  # Add webhook notifier
+        self.scraper_type = scraper_type
+        self.webhook_notifier = WebhookNotifier(scraper_type=scraper_type)
         
         if not self._authenticate():
             raise Exception("Failed to authenticate with Google Drive")
     
     def _authenticate(self) -> bool:
-        """Authenticate with Google Drive API with improved error handling"""
+        """Authenticate with Google Drive API"""
         try:
             creds = None
             os.makedirs('data', exist_ok=True)
@@ -42,34 +40,28 @@ class GoogleDriveUploader:
                     logger.info("Loaded existing credentials")
                 except Exception as e:
                     logger.warning(f"Could not load token, will re-authenticate: {e}")
-                    # Delete corrupted token file
                     try:
                         os.remove(self.token_path)
-                        logger.info("Removed corrupted token file")
                     except:
                         pass
                     creds = None
             
-            # Check credentials validity and refresh if needed
-            if creds:
-                if not creds.valid:
-                    if creds.expired and creds.refresh_token:
+            # Refresh or get new credentials
+            if creds and not creds.valid:
+                if creds.expired and creds.refresh_token:
+                    try:
+                        logger.info("Refreshing expired credentials...")
+                        creds.refresh(Request())
+                        logger.info("Credentials refreshed successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to refresh credentials: {e}")
                         try:
-                            logger.info("Refreshing expired credentials...")
-                            creds.refresh(Request())
-                            logger.info("Credentials refreshed successfully")
-                        except Exception as e:
-                            logger.error(f"Failed to refresh credentials: {e}")
-                            # Delete invalid token and force re-auth
-                            try:
-                                os.remove(self.token_path)
-                                logger.info("Removed invalid token file")
-                            except:
-                                pass
-                            creds = None
-                    else:
-                        logger.warning("Credentials invalid and no refresh token available")
+                            os.remove(self.token_path)
+                        except:
+                            pass
                         creds = None
+                else:
+                    creds = None
             
             # Get new credentials if needed
             if not creds:
@@ -78,8 +70,7 @@ class GoogleDriveUploader:
                     return False
                 
                 logger.info("Starting OAuth flow for new credentials...")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    GOOGLE_DRIVE_CREDENTIALS_PATH, SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(GOOGLE_DRIVE_CREDENTIALS_PATH, SCOPES)
                 creds = flow.run_local_server(port=0)
                 logger.info("New credentials obtained successfully")
             
@@ -97,48 +88,29 @@ class GoogleDriveUploader:
             
         except Exception as e:
             logger.error(f"Authentication failed: {e}")
-            self.service = None
             return False
     
+    def _is_client_error(self, error: Exception) -> bool:
+        """Check if error is a client error (4xx) that should not be retried"""
+        if isinstance(error, HttpError):
+            return 400 <= error.resp.status < 500
+        return False
     
-    def _is_network_error(self, error: Exception) -> bool:
-        """Check if error is a network/connectivity issue that can be retried"""
-        error_str = str(error).lower()
-        network_indicators = [
-            'unable to find the server',
-            'connection refused',
-            'network is unreachable',
-            'timeout',
-            'connection timed out',
-            'connection reset',
-            'dns resolution failed',
-            'name resolution failure',
-            'socket.gaierror',
-            'connectionerror',
-            'httperror: 503',  # Service unavailable
-            'httperror: 502',  # Bad gateway
-            'httperror: 504',  # Gateway timeout
-            'httperror: 429',  # Too many requests
-        ]
-        return any(indicator in error_str for indicator in network_indicators)
-
-    def _upload_with_retry(self, upload_func, description: str, max_retries: int = 10, 
-                          initial_delay: float = 2.0) -> Optional[Dict]:
+    def _upload_with_retry(self, upload_func, description: str, max_retries: int = 10) -> Optional[Dict]:
         """
-        Execute upload function with exponential backoff retry for network errors
+        Execute upload function with retry logic for all errors except client errors
         
         Args:
-            upload_func: Function to execute (should return Dict or None)
+            upload_func: Function to execute
             description: Description for logging
             max_retries: Maximum number of retry attempts
-            initial_delay: Initial delay in seconds
             
         Returns:
-            Dict or None: Upload result or None if all retries failed
+            Dict or None: Upload result or None if failed
         """
         for attempt in range(max_retries + 1):
             try:
-                logger.debug(f"Upload attempt {attempt + 1}/{max_retries + 1}: {description}")
+                logger.info(f"Upload attempt {attempt + 1}/{max_retries + 1}: {description}")
                 result = upload_func()
                 
                 if result:
@@ -146,40 +118,40 @@ class GoogleDriveUploader:
                         logger.info(f"Upload successful on attempt {attempt + 1}: {description}")
                     return result
                 else:
-                    logger.warning(f"Upload returned None on attempt {attempt + 1}: {description}")
+                    logger.warning(f"Upload returned None: {description}")
                     
             except Exception as e:
-                is_network_error = self._is_network_error(e)
+                is_client_error = self._is_client_error(e)
+                
+                if is_client_error:
+                    logger.error(f"Client error, stopping retries: {e}")
+                    return None
                 
                 if attempt == max_retries:
                     logger.error(f"Upload failed after {max_retries + 1} attempts: {description}")
                     logger.error(f"Final error: {e}")
                     return None
                 
-                if is_network_error:
-                    delay = initial_delay * (1.5 ** attempt)  # Gentler exponential backoff
-                    logger.warning(f"Network error on attempt {attempt + 1}: {e}")
-                    logger.info(f"Retrying in {delay:.1f} seconds... ({max_retries - attempt} attempts remaining)")
-                    
-                    try:
-                        time.sleep(delay)
-                    except KeyboardInterrupt:
-                        logger.info("Upload retry interrupted by user")
-                        return None
-                        
-                else:
-                    # Non-network error - don't retry
-                    logger.error(f"Non-retryable error during upload: {e}")
+                logger.warning(f"Error on attempt {attempt + 1}: {e}")
+                logger.info(f"Retries remaining: {max_retries - attempt}")
+                
+                # Wait for user input before retrying
+                print(f"\n>>> Upload failed. Press Enter to retry (Attempt {attempt + 2}/{max_retries + 1})...")
+                try:
+                    input()
+                except KeyboardInterrupt:
+                    logger.info("Upload retry interrupted by user")
                     return None
         
         return None
     
     def _upload_file(self, file_path: str, drive_filename: str) -> Optional[Dict]:
-        """Upload a single file to Google Drive from disk"""
+        """Upload a file to Google Drive"""
         def _do_upload():
             if not self.service:
                 logger.error("Google Drive service not initialized")
                 return None
+            
             if not os.path.exists(file_path):
                 logger.error(f"File not found: {file_path}")
                 return None
@@ -203,100 +175,60 @@ class GoogleDriveUploader:
                 'view_link': result['webViewLink']
             }
         
-        return self._upload_with_retry(
-            _do_upload, 
-            f"main file '{drive_filename}'"
-        )
-
-    def _upload_json_content(self, data: Dict[str, Any], drive_filename: str) -> Optional[Dict]:
-        """Upload a JSON document to Google Drive directly from memory"""
-        def _do_upload():
-            if not self.service:
-                logger.error("Google Drive service not initialized")
-                return None
-            
-            file_metadata: Dict[str, Any] = {'name': drive_filename}
-            if self.folder_id:
-                file_metadata['parents'] = [self.folder_id]
-
-            payload = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
-            buffer = io.BytesIO(payload)
-            media = MediaIoBaseUpload(buffer, mimetype='application/json', resumable=False)
-
-            result = self.service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id,name,size,webViewLink'
-            ).execute()
-
-            return {
-                'file_id': result['id'],
-                'filename': result['name'],
-                'size': result.get('size', '0'),
-                'view_link': result['webViewLink']
-            }
-        
-        return self._upload_with_retry(
-            _do_upload, 
-            f"metadata file '{drive_filename}'"
-        )
+        return self._upload_with_retry(_do_upload, f"file '{drive_filename}'")
     
-    def upload_scraper_results(self, json_file_path: str, jobs_count: int = 0, 
-                             duplicates_skipped: int = 0, failed_extractions: int = 0) -> Optional[Dict]:
+    def upload_scraper_results(self, json_file_path: str, items_count: int = 0, 
+                             duplicates_skipped: int = 0, failed_extractions: int = 0,
+                             scraper_type: str = None) -> Optional[Dict]:
         """
-        Upload scraper results with metadata to Google Drive (with retry mechanism)
+        Upload scraper results to Google Drive and trigger webhook
+        
+        Args:
+            json_file_path: Path to the JSON file to upload
+            items_count: Number of items scraped
+            duplicates_skipped: Number of duplicates skipped
+            failed_extractions: Number of failed extractions
+            scraper_type: Type of scraper (optional, uses instance default if not provided)
+        
+        Returns:
+            Dict with upload details or None if failed
         """
         try:
+            effective_scraper_type = scraper_type or self.scraper_type
+            
             if not os.path.exists(json_file_path):
                 logger.error(f"File not found: {json_file_path}")
                 return None
             
             filename = os.path.basename(json_file_path)
-            logger.info(f"Starting upload of {jobs_count} jobs to Google Drive...")
+            content_type = "posts" if effective_scraper_type == "linkedin_posts" else "jobs"
+            
+            logger.info(f"Starting upload of {items_count} {content_type} to Google Drive...")
             logger.info(f"Local file: {json_file_path}")
             
-            # 1) Upload main JSON file from disk with retry
-            logger.info("Uploading main jobs file...")
+            # Upload main file
+            logger.info(f"Uploading {content_type} file...")
             main_upload = self._upload_file(json_file_path, filename)
+            
             if not main_upload:
-                logger.error("Failed to upload main jobs file")
+                logger.error(f"Failed to upload {content_type} file")
                 return None
             
-            logger.info(f"Main file uploaded successfully: {main_upload['filename']} ({main_upload['size']} bytes)")
+            logger.info(f"File uploaded successfully: {main_upload['filename']} ({main_upload['size']} bytes)")
             
-            # 2) Upload metadata JSON directly from memory with retry
-            logger.info("Uploading metadata file...")
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            metadata = {
-                'scraping_session': {
-                    'completed_at': current_time,
-                    'jobs_scraped': jobs_count,
-                    'duplicates_skipped': duplicates_skipped,
-                    'failed_extractions': failed_extractions
-                },
-                'file_info': {
-                    'drive_file_id': main_upload['file_id'],
-                    'filename': main_upload['filename'],
-                    'size_bytes': main_upload['size'],
-                    'view_link': main_upload['view_link']
-                }
-            }
-            
-            metadata_drive_name = filename.replace('.json', '_metadata.json')
-            metadata_upload = self._upload_json_content(metadata, metadata_drive_name)
-
-            # Log results
+            # Log summary
             logger.info("=" * 60)
             logger.info("UPLOAD COMPLETED SUCCESSFULLY!")
-            logger.info(f"Uploaded {jobs_count} jobs, skipped {duplicates_skipped} duplicates")
-            logger.info(f"Main file: {main_upload['view_link']}")
-            if metadata_upload:
-                logger.info(f"Metadata file uploaded successfully")
-            else:
-                logger.warning("Metadata upload failed (but main file is safe)")
+            logger.info(f"Uploaded {items_count} {content_type}, failed extractions: {failed_extractions}")
+            if duplicates_skipped > 0:
+                logger.info(f"Skipped {duplicates_skipped} duplicates")
+            logger.info(f"View file: {main_upload['view_link']}")
             
-            # 3) Trigger n8n webhook after successful upload
+            # Trigger webhook
             logger.info("Triggering n8n workflow...")
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            stats_key = 'posts_scraped' if effective_scraper_type == "linkedin_posts" else 'jobs_scraped'
+            
             webhook_success = self.webhook_notifier.trigger_n8n_workflow(
                 file_info={
                     'filename': main_upload['filename'],
@@ -306,7 +238,7 @@ class GoogleDriveUploader:
                     'completed_at': current_time
                 },
                 scrape_stats={
-                    'jobs_scraped': jobs_count,
+                    stats_key: items_count,
                     'duplicates_skipped': duplicates_skipped,
                     'failed_extractions': failed_extractions
                 }
@@ -321,14 +253,10 @@ class GoogleDriveUploader:
             
             return {
                 'main_file': main_upload,
-                'metadata_file': metadata_upload,
                 'webhook_triggered': webhook_success,
-                'summary': f"Uploaded {jobs_count} jobs, skipped {duplicates_skipped} duplicates"
+                'summary': f"Uploaded {items_count} {content_type}, failed: {failed_extractions}"
             }
             
-        except KeyboardInterrupt:
-            logger.info("Upload interrupted by user")
-            return None
         except Exception as e:
             logger.error(f"Unexpected error during upload: {e}")
             return None
