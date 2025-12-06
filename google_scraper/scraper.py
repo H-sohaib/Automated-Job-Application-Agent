@@ -324,7 +324,7 @@ async def perform_scraping(page, output_filename: str = None, max_jobs_override:
         # Initialize the job hash store
         read_only_mode = TESTING_MODE
         hash_store = JobHashStore(read_only=read_only_mode)
-        hash_store.cleanup_expired()
+        # hash_store.cleanup_expired()
         if read_only_mode:
             logger.warning("Hash storage is DISABLED - running in testing mode")
         

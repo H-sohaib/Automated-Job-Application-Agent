@@ -9,9 +9,9 @@ import traceback
 
 # Import the scraping function from scraper.py
 from google_scraper.scraper import perform_scraping
-# Import LinkedIn scraper (you'll need to create this)
+# Import LinkedIn scraper (you'll need to create this)2
 from linkedin_scraper.scraper import perform_linkedin_scraping
-from config import JOB_SEARCH_KEYWORDS , MAX_JOBS_TO_SCRAPE
+from config import JOB_SEARCH_KEYWORDS , MAX_JOBS_TO_SCRAPE, TESTING_MODE
 
 
 # Set up logging
@@ -215,7 +215,7 @@ async def run_google_scraper():
             logger.info(f"{'='*60}")
 
             # Upload after all keywords are done:
-            if total_jobs > 0 and os.path.exists(output_file):
+            if total_jobs > 0 and os.path.exists(output_file) and not TESTING_MODE:
                 try:
                     from utility.google_drive_uploader import GoogleDriveUploader
                     
