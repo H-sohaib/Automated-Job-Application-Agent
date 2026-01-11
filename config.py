@@ -109,15 +109,15 @@ LINKEDIN_WEBHOOK_URL = LINKEDIN_WEBHOOK_URL_PROD
 
 # Keep the old N8N_WEBHOOK_URL for backward compatibility (defaults to Google Jobs)
 N8N_WEBHOOK_URL = GOOGLE_JOBS_WEBHOOK_URL
-N8N_AUTH_TOKEN = os.getenv('N8N_AUTH_TOKEN', 'Goblin123/@')
+N8N_AUTH_TOKEN = os.getenv('N8N_AUTH_TOKEN', '')  # Your n8n authentication token
 
 
 # Webhook retry configuration
 MAX_RETRIES = 5
 
 # Google Drive Configuration (from environment variables)
-GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID', '1zE5YJNxzvjSIB_BdbLH556g6Tqeuj6Eq')  # Your Drive folder ID
-GOOGLE_DRIVE_CREDENTIALS_PATH = 'data/client_secret_729303119270-0mifattvl0sdr1ks4pmp0oqj6erb13ob.apps.googleusercontent.com.json'  # Downloaded from Google Cloud Console
+GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID', '')  # Your Drive folder ID
+GOOGLE_DRIVE_CREDENTIALS_PATH = os.getenv('GOOGLE_DRIVE_CREDENTIALS_PATH', '')  # Downloaded from Google Cloud Console
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # Human-like timing configurations
@@ -125,8 +125,3 @@ SLEEP_SHORT = (1.0, 2.5)      # Quick actions (clicks)
 SLEEP_MEDIUM = (2.0, 4.0)     # Reading content, waiting for panels
 SLEEP_LONG = (3.5, 6.0)       # Waiting for page loads, scrolling
 SLEEP_SCROLL = (1.5, 3.0)     # Scrolling delay
-
-
-
-# Client_secret= "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"
-# CLIENT_ID = "729303119270-0mifattvl0sdr1ks4pmp0oqj6erb13ob.apps.googleusercontent.com"

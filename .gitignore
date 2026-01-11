@@ -2,6 +2,7 @@ trash
 
 .venv
 .conda
+.env
 __pycache__
 .vscode
 *.log
