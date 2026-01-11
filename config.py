@@ -11,10 +11,14 @@ MAX_POSTS_TO_SCRAPE = MAX_JOBS_TO_SCRAPE  # 0 means unlimited
 
 JOB_SEARCH_KEYWORDS = [
     # IT / Informatique générale
+    "stage PFE",
+    "internship PFE",
+    "internship Pre hired",
+    "stage pré embauche",
     "stage PFE en informatique",
     "stage pré embauche en informatique",
-    "internship PFE in IT",
-    "internship Pre hired in IT",
+    # "internship PFE in IT",
+    # "internship Pre hired in IT",
     # "stage IT",
     # "IT internship",
 
@@ -31,11 +35,13 @@ JOB_SEARCH_KEYWORDS = [
     "information security internship",
     "ethical hacking internship",
     "stage pentesting",
+    "stage soc",
+    "SOC intern",
 
     # Développement web
-    "stage développeur web",
+    "stage developpeur web",
     "web developer intern",
-    "stage web",
+    # "stage web",
     "internship web development",
     "back-end developer intern",
     "stage back-end",
@@ -49,6 +55,8 @@ JOB_SEARCH_KEYWORDS = [
     "python developer intern",
     "stage python",
     "java developer intern",
+    "Spring developer intern",
+    "stage java spring",
     "stage java",
 ]
 
@@ -59,19 +67,18 @@ MAX_SCROLL_ATTEMPTS = 3
 SCROLL_DELAY = 2  # seconds
 BATCH_SIZE = 5  # Initial batch size (will be adjusted dynamically)
 
-# LinkedIn-specific CSS selectors - UPDATED based on HTML structure
-LINKEDIN_POST_CONTAINER_SELECTOR = 'li.wMRiBRCvyAuKYKJAJQBPBewvOUTZLAyc'  # Each post item
-LINKEDIN_PERSON_NAME_SELECTOR = '.entity-result__content-actor .AHnruhvJOLcieYAdDEXLwXpwxPshmxsPkCs.t-16 a span[aria-hidden="true"]'  # Person/Company name
-LINKEDIN_PERSON_LINK_SELECTOR = '.entity-result__content-actor .AHnruhvJOLcieYAdDEXLwXpwxPshmxsPkCs.t-16 a.QJGrFqtGqHGdfvGNjGKbMnXKKgXQAqEbI'  # Profile/Company link
-LINKEDIN_HEADING_SELECTOR = '.entity-result__content-actor .FPdNKwviUxbzXoewHkEjWfHOezasHFIMKbJox.t-14.t-black.t-normal'  # Job title or follower count
-LINKEDIN_POST_TIME_SELECTOR = '.entity-result__content-actor p.t-black--light.t-12 span[aria-hidden="true"]'  # Posted time
-LINKEDIN_POST_CONTENT_SELECTOR = '.entity-result__content-inner-container--right-padding p.entity-result__content-summary'  # Post content
-LINKEDIN_SEE_MORE_BUTTON_SELECTOR = '.entity-result__content-inner-container--right-padding button.reusable-search-show-more-link'  # See more button
-LINKEDIN_POST_LINK_SELECTOR = '.entity-result__content-inner-container--right-padding a.QJGrFqtGqHGdfvGNjGKbMnXKKgXQAqEbI[href*="/feed/update/"]'  # Post link
-LINKEDIN_POST_URN_SELECTOR = 'div.jzdaHAHkcwgvghZOledAWhWddzlUnvHIQ[data-chameleon-result-urn]'  # URN container
-LINKEDIN_THREE_DOT_MENU_SELECTOR = '.entity-result__actions-overflow-menu-dropdown button.artdeco-dropdown__trigger'  # Three-dot menu
-LINKEDIN_COPY_LINK_SELECTOR = 'div[data-control-name="copy_link"]'  # Copy link option (in dropdown)
-LINKEDIN_POST_IMAGE_SELECTOR = '.entity-result__content-inner-container--right-padding .ivm-image-view-model img'  # Post image (if any)
+# LinkedIn-specific CSS selectors - UPDATED based on actual HTML structure
+LINKEDIN_POST_CONTAINER_SELECTOR = 'li.WdkfqDOUJZCWthfjyTNzddOIbUbRvfCG'  # Each post item
+LINKEDIN_PERSON_NAME_SELECTOR = 'span.ClwkWtshSslMPZIFyoYLNeAGiibyUUUwGNzhCxZI a span[aria-hidden="true"]'  # Person/Company name
+LINKEDIN_PERSON_LINK_SELECTOR = 'span.ClwkWtshSslMPZIFyoYLNeAGiibyUUUwGNzhCxZI a.qZeTGqFRxixYywXeiJBKyqEkwEmzWYtTPNuLg'  # Profile/Company link
+LINKEDIN_HEADING_SELECTOR = 'div.OulMkMIIgxfHHNTPcFnQMiohVdfmCyVAYsGqKE'  # Job title or follower count
+LINKEDIN_POST_TIME_SELECTOR = 'div.entity-result__content-actor p.t-black--light.t-12 span[aria-hidden="true"]'  # Posted time (1d, 7h, 21h, etc.)
+LINKEDIN_POST_CONTENT_SELECTOR = 'p.entity-result__content-summary'  # Post content paragraph
+LINKEDIN_POST_LINK_SELECTOR = 'div.linked-area.flex-1.cursor-pointer'  # Clickable area to open post
+LINKEDIN_SEE_MORE_BUTTON_SELECTOR = 'button.reusable-search-show-more-link'  # See more button
+LINKEDIN_POST_URN_SELECTOR = 'div.bnSSTYNVfGjvkaHMrUGLVhMzPgsNuQrTA[data-chameleon-result-urn]'  # URN container
+LINKEDIN_THREE_DOT_MENU_SELECTOR = 'button.artdeco-dropdown__trigger'  # Three-dot overflow menu
+LINKEDIN_POST_IMAGE_SELECTOR = 'img.ivm-view-attr__img--centered.entity-result__embedded-object-image'  # Post image (if exists)
 
 # CSS Selectors
 JOB_CONTAINER_SELECTOR = '.EimVGf'

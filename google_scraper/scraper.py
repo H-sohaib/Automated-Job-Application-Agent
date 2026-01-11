@@ -304,6 +304,8 @@ async def extract_detailed_job_info(page, job_element, basic_info: Dict) -> Opti
     except Exception as e:
         logger.error(f"Error extracting detailed job info for '{job_title}' at '{job_company}': {e}")
         return None
+
+
 async def perform_scraping(page, output_filename: str = None, max_jobs_override: Optional[int] = None) -> Optional[int]:
     """
     Scrape job listings from Google Jobs search results with scrolling support.
@@ -362,7 +364,7 @@ async def perform_scraping(page, output_filename: str = None, max_jobs_override:
             job_elements = await page.query_selector_all(JOB_CONTAINER_SELECTOR)
             current_job_count = len(job_elements)
             
-            logger.debug(f"Found {current_job_count} job elements on page (scroll attempt {scroll_attempts})")
+            logger.info(f"Found {current_job_count} job elements on page (scroll attempt {scroll_attempts})")
             
             # Process visible jobs
             job_limit_reached = False  # Add flag to track if limit was reached
@@ -383,7 +385,7 @@ async def perform_scraping(page, output_filename: str = None, max_jobs_override:
                 # Skip if we've already processed this job in this session
                 job_key = f"{job_title}_{job_company}"
                 if job_key in processed_job_keys:
-                    logger.debug(f"Skipping already processed job: '{job_title}' at '{job_company}'")
+                    logger.info(f"Skipping already processed job: '{job_title}' at '{job_company}'")
                     continue
                 
                 processed_job_keys.add(job_key)
@@ -396,7 +398,7 @@ async def perform_scraping(page, output_filename: str = None, max_jobs_override:
                 }
                 
                 if hash_store.is_basic_duplicate(preliminary_job_data):
-                    logger.debug(f"Skipping basic duplicate: '{job_title}' at '{job_company}'")
+                    logger.info(f"Skipping basic duplicate: '{job_title}' at '{job_company}'")
                     skipped_duplicates += 1
                     continue
 
@@ -409,7 +411,7 @@ async def perform_scraping(page, output_filename: str = None, max_jobs_override:
                 
                 # Final duplicate check with complete data
                 if hash_store.is_duplicate(detailed_info):
-                    logger.debug(f"Skipping confirmed duplicate after full check: '{job_title}' at '{job_company}'")
+                    logger.info(f"Skipping confirmed duplicate after full check: '{job_title}' at '{job_company}'")
                     skipped_duplicates += 1
                     continue
                 
@@ -417,7 +419,7 @@ async def perform_scraping(page, output_filename: str = None, max_jobs_override:
                 if save_job_incrementally(detailed_info, output_filename):
                     jobs_count += 1
                     jobs_to_send.append(detailed_info)
-                    logger.info(f"Successfully processed job {jobs_count}: '{job_title}' at '{job_company}'")
+                    logger.debug(f"Successfully processed job {jobs_count}: '{job_title}' at '{job_company}'")
                 else:
                     logger.error(f"Failed to save job: '{job_title}' at '{job_company}'")
                     continue

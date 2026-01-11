@@ -1,8 +1,11 @@
 trash
 
 .venv
+.conda
 __pycache__
 .vscode
 *.log
+*.json
+*.pickle
 linkedin_cookies.json
 google_cookies.json

@@ -1,4 +1,4 @@
-from  helpers import *
+from  linkedin_scraper.helpers import *
 
 
 async def perform_linkedin_scraping(page) -> Optional[int]:
@@ -124,6 +124,11 @@ async def perform_linkedin_scraping(page) -> Optional[int]:
                 
                 # Add small delay between posts
                 await human_sleep(SLEEP_SHORT)
+            
+            # CHECK STOP CONDITION BEFORE SCROLLING - ADD THIS:
+            if consecutive_existing_posts >= STOP_AFTER_EXISTING_POSTS:
+                logger.info(f"Stop condition met. Exiting main scraping loop.")
+                break  # Break from WHILE loop
             
             # Break if we've reached max posts or received shutdown signal
             if (post_limit is not None and posts_count >= post_limit) or shutdown_flag:
