@@ -53,14 +53,6 @@ class WebhookNotifier:
             }
         }
     
-    def _should_retry(self, status_code: int) -> bool:
-        """Determine if request should be retried based on status code"""
-        # Don't retry client errors (4xx)
-        if 400 <= status_code < 500:
-            logger.error(f"Client error {status_code} detected. Stopping retries.")
-            return False
-        return True
-    
     def trigger_n8n_workflow(self, file_info: Dict[str, Any], scrape_stats: Dict[str, Any]) -> bool:
         """
         Trigger n8n workflow with manual retry logic
@@ -75,6 +67,10 @@ class WebhookNotifier:
         }
         
         for attempt in range(MAX_RETRIES + 1):
+            # Wait for user input at each try
+            print(f"\n>>> Press Enter to trigger webhook (Attempt {attempt + 1}/{MAX_RETRIES + 1})...")
+            input()
+            
             try:
                 logger.info(f"Triggering {self.scraper_name} webhook (attempt {attempt + 1}/{MAX_RETRIES + 1})")
                 
@@ -93,23 +89,9 @@ class WebhookNotifier:
                     return True
                 
                 logger.warning(f"{self.scraper_name} webhook failed with status {response.status_code}")
-                
-                if not self._should_retry(response.status_code):
-                    return False
                     
-            except requests.exceptions.Timeout:
-                logger.warning(f"Timeout error on attempt {attempt + 1}/{MAX_RETRIES + 1}")
-            except requests.exceptions.ConnectionError as e:
-                logger.warning(f"Connection error on attempt {attempt + 1}/{MAX_RETRIES + 1}: {e}")
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Network error on attempt {attempt + 1}/{MAX_RETRIES + 1}: {e}")
             except Exception as e:
-                logger.error(f"Unexpected error on attempt {attempt + 1}/{MAX_RETRIES + 1}: {e}")
-            
-            # Wait for user input before retrying
-            if attempt < MAX_RETRIES:
-                print(f"\n>>> Webhook failed. Press Enter to retry (Attempt {attempt + 2}/{MAX_RETRIES + 1})...")
-                input()
+                logger.error(f"Error on attempt {attempt + 1}/{MAX_RETRIES + 1}: {e}")
         
         logger.error(f"Failed to trigger {self.scraper_name} webhook after {MAX_RETRIES + 1} attempts")
         return False
