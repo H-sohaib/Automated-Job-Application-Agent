@@ -10,3 +10,4 @@ __pycache__
 *.pickle
 linkedin_cookies.json
 google_cookies.json
+*.html

@@ -15,29 +15,11 @@ from config import *
 # Set up logging for the LinkedIn scraper module
 logger = logging.getLogger(__name__)
 
+# Import SQLite store for duplicate detection
+from utility.linkedin_post_store import load_scraped_ids, save_scraped_id, init_database
+
 # Global flag for graceful shutdown
 shutdown_flag = False
-
-def load_scraped_ids(filename='data/scraped_post_ids.json'):
-    """Load scraped post IDs from a file."""
-    try:
-        if os.path.exists(filename):
-            with open(filename, 'r', encoding='utf-8') as f:
-                return set(json.load(f))
-    except Exception as e:
-        logger.error(f"Error loading scraped IDs: {e}")
-    return set()
-
-def save_scraped_id(post_id, filename='data/scraped_post_ids.json'):
-    """Save a new scraped post ID to the file."""
-    try:
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        scraped_ids = load_scraped_ids(filename)
-        scraped_ids.add(post_id)
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(list(scraped_ids), f, indent=2)
-    except Exception as e:
-        logger.error(f"Error saving scraped ID: {e}")
 
 def random_sleep(range_tuple: Tuple[float, float]) -> float:
     """Get a random sleep duration within the specified range."""
@@ -183,9 +165,13 @@ def save_post_incrementally(post_data: Dict, filename: str) -> bool:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(posts, f, ensure_ascii=False, indent=2)
         
-        # Save the new post ID to the scraped IDs file (only if we have an ID and not in testing mode)
+        # Save the new post ID to the SQLite database (only if we have an ID and not in testing mode)
         if post_id and not TESTING_MODE:
-            save_scraped_id(post_id)
+            save_scraped_id(
+                post_id, 
+                person_name=post_data.get('person_name'),
+                post_link=post_data.get('post_link')
+            )
         elif post_id and TESTING_MODE:
             logger.debug(f"TESTING_MODE enabled - not saving post ID '{post_id}' to duplicate tracker")
         

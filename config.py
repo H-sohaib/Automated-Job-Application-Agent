@@ -6,7 +6,8 @@ load_dotenv()
 
 # Testing Configuration
 TESTING_MODE = False     # Set to True to enable testing mode (disables hash storage)
-MAX_JOBS_TO_SCRAPE = 3 if TESTING_MODE else 0  # 0 means unlimited
+# MAX_JOBS_TO_SCRAPE = 3 if TESTING_MODE else 0  # 0 means unlimited
+MAX_JOBS_TO_SCRAPE = 35
 MAX_POSTS_TO_SCRAPE = MAX_JOBS_TO_SCRAPE  # 0 means unlimited
 
 JOB_SEARCH_KEYWORDS = [
@@ -68,17 +69,19 @@ SCROLL_DELAY = 2  # seconds
 BATCH_SIZE = 5  # Initial batch size (will be adjusted dynamically)
 
 # LinkedIn-specific CSS selectors - UPDATED based on actual HTML structure
-LINKEDIN_POST_CONTAINER_SELECTOR = 'li.WdkfqDOUJZCWthfjyTNzddOIbUbRvfCG'  # Each post item
-LINKEDIN_PERSON_NAME_SELECTOR = 'span.ClwkWtshSslMPZIFyoYLNeAGiibyUUUwGNzhCxZI a span[aria-hidden="true"]'  # Person/Company name
-LINKEDIN_PERSON_LINK_SELECTOR = 'span.ClwkWtshSslMPZIFyoYLNeAGiibyUUUwGNzhCxZI a.qZeTGqFRxixYywXeiJBKyqEkwEmzWYtTPNuLg'  # Profile/Company link
-LINKEDIN_HEADING_SELECTOR = 'div.OulMkMIIgxfHHNTPcFnQMiohVdfmCyVAYsGqKE'  # Job title or follower count
+LINKEDIN_POST_CONTAINER_SELECTOR = 'div.scaffold-finite-scroll__content ul[role="list"] > li' # Each post item
+
+LINKEDIN_PERSON_NAME_SELECTOR = 'div.entity-result__content-actor a[data-test-app-aware-link] span[aria-hidden="true"]'  # Person/Company name
+LINKEDIN_PERSON_LINK_SELECTOR = 'div.entity-result__content-actor a[data-test-app-aware-link]'  # Profile/Company link using data attribute
+LINKEDIN_HEADING_SELECTOR = 'div.entity-result__content-actor div.linked-area div.t-14.t-black.t-normal'  # Job title or follower count
 LINKEDIN_POST_TIME_SELECTOR = 'div.entity-result__content-actor p.t-black--light.t-12 span[aria-hidden="true"]'  # Posted time (1d, 7h, 21h, etc.)
 LINKEDIN_POST_CONTENT_SELECTOR = 'p.entity-result__content-summary'  # Post content paragraph
 LINKEDIN_POST_LINK_SELECTOR = 'div.linked-area.flex-1.cursor-pointer'  # Clickable area to open post
 LINKEDIN_SEE_MORE_BUTTON_SELECTOR = 'button.reusable-search-show-more-link'  # See more button
-LINKEDIN_POST_URN_SELECTOR = 'div.bnSSTYNVfGjvkaHMrUGLVhMzPgsNuQrTA[data-chameleon-result-urn]'  # URN container
-LINKEDIN_THREE_DOT_MENU_SELECTOR = 'button.artdeco-dropdown__trigger'  # Three-dot overflow menu
-LINKEDIN_POST_IMAGE_SELECTOR = 'img.ivm-view-attr__img--centered.entity-result__embedded-object-image'  # Post image (if exists)
+LINKEDIN_POST_URN_SELECTOR = 'div[data-chameleon-result-urn]'  # URN container using data attribute only
+
+# LINKEDIN_THREE_DOT_MENU_SELECTOR = 'button.artdeco-dropdown__trigger'  # Three-dot overflow menu
+# LINKEDIN_POST_IMAGE_SELECTOR = 'img.ivm-view-attr__img--centered.entity-result__embedded-object-image'  # Post image (if exists)
 
 # CSS Selectors
 JOB_CONTAINER_SELECTOR = '.EimVGf'
